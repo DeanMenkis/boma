@@ -1,7 +1,10 @@
 __pycache__/
 *.pyc
 .env
+*.local
 venv/
 env/
 .vscode/
 .idea/
+# Firebase service account — never commit
+backend/service-account.json

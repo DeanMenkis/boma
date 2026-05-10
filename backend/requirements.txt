@@ -1,4 +1,6 @@
 fastapi
-uvicorn
+uvicorn[standard]
 python-dotenv
 requests
+firebase-admin
+

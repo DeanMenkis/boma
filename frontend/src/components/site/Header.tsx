@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Boxes } from "lucide-react";
+import { Boxes, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
 
 export function Header() {
   const pathname = usePathname();
+  const { user, loading, logOut } = useAuth();
 
   return (
     <header className="sticky top-0 z-50 glass">
@@ -56,16 +58,26 @@ export function Header() {
         </nav>
 
         <div className="flex items-center gap-2">
-          <Link href="/login">
-            <Button variant="ghost" size="sm">
-              Log in
-            </Button>
-          </Link>
-          <Link href="/signup">
-            <Button variant="hero" size="sm">
-              Get started
-            </Button>
-          </Link>
+          {user && !loading ? (
+            <>
+              <span className="hidden sm:block text-sm text-muted-foreground max-w-[160px] truncate">
+                {user.displayName ?? user.email}
+              </span>
+              <Button variant="ghost" size="sm" onClick={() => void logOut()} className="gap-1.5">
+                <LogOut className="h-3.5 w-3.5" />
+                Sign out
+              </Button>
+            </>
+          ) : (
+            <>
+              <Link href="/login">
+                <Button variant="ghost" size="sm">Log in</Button>
+              </Link>
+              <Link href="/signup">
+                <Button variant="hero" size="sm">Get started</Button>
+              </Link>
+            </>
+          )}
         </div>
       </div>
     </header>

@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Boxes } from "lucide-react";
 import { useState, type FormEvent } from "react";
+import { Boxes } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/contexts/AuthContext";
 
 type Props = {
   mode: "login" | "signup";
@@ -11,18 +13,41 @@ type Props = {
 
 export function AuthCard({ mode }: Props) {
   const isSignup = mode === "signup";
-  const [loading, setLoading] = useState(false);
+  const { signIn, signUp, signInWithGoogle } = useAuth();
 
-  const runPlaceholderAuth = async () => {
-    setLoading(true);
-    await new Promise((r) => setTimeout(r, 800));
-    setLoading(false);
-    alert(`${isSignup ? "Sign up" : "Log in"} flow is a placeholder — wire Firebase to enable.`);
-  };
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    await runPlaceholderAuth();
+    setError(null);
+    setLoading(true);
+    try {
+      if (isSignup) {
+        await signUp(email, password, name || undefined);
+      } else {
+        await signIn(email, password);
+      }
+    } catch (err) {
+      setError(formatFirebaseError(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onGoogle = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      await signInWithGoogle();
+    } catch (err) {
+      setError(formatFirebaseError(err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -46,9 +71,37 @@ export function AuthCard({ mode }: Props) {
         </p>
 
         <form onSubmit={onSubmit} className="mt-6 space-y-3">
-          {isSignup && <Field label="Name" type="text" placeholder="Ada Lovelace" />}
-          <Field label="Email" type="email" placeholder="you@company.com" required />
-          <Field label="Password" type="password" placeholder="••••••••" required />
+          {isSignup && (
+            <Field
+              label="Name"
+              type="text"
+              placeholder="Ada Lovelace"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          )}
+          <Field
+            label="Email"
+            type="email"
+            placeholder="you@company.com"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          <Field
+            label="Password"
+            type="password"
+            placeholder="••••••••"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+
+          {error && (
+            <p className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">
+              {error}
+            </p>
+          )}
 
           <Button type="submit" variant="hero" size="lg" className="w-full mt-2" disabled={loading}>
             {loading ? "…" : isSignup ? "Create account" : "Log in"}
@@ -65,7 +118,7 @@ export function AuthCard({ mode }: Props) {
           className="w-full"
           type="button"
           disabled={loading}
-          onClick={() => void runPlaceholderAuth()}
+          onClick={() => void onGoogle()}
         >
           <GoogleIcon /> Continue with Google
         </Button>
@@ -92,6 +145,10 @@ export function AuthCard({ mode }: Props) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 function Field({
   label,
   ...rest
@@ -116,4 +173,23 @@ function GoogleIcon() {
       />
     </svg>
   );
+}
+
+function formatFirebaseError(err: unknown): string {
+  if (err && typeof err === "object" && "code" in err) {
+    const code = (err as { code: string }).code;
+    const messages: Record<string, string> = {
+      "auth/user-not-found": "No account found with that email.",
+      "auth/wrong-password": "Incorrect password.",
+      "auth/email-already-in-use": "An account with that email already exists.",
+      "auth/weak-password": "Password should be at least 6 characters.",
+      "auth/invalid-email": "Please enter a valid email address.",
+      "auth/too-many-requests": "Too many attempts. Try again later.",
+      "auth/popup-closed-by-user": "Sign-in popup was closed.",
+      "auth/cancelled-popup-request": "Only one popup at a time.",
+      "auth/network-request-failed": "Network error. Check your connection.",
+    };
+    return messages[code] ?? `Authentication error (${code})`;
+  }
+  return "Something went wrong. Please try again.";
 }
