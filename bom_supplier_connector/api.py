@@ -13,8 +13,8 @@ Endpoints:
   GET  /digikey/callback          OAuth code exchange; sets boma_session cookie
   GET  /digikey/status            { logged_in: bool }
   POST /enrich                    multipart CSV upload → enriched BOM
-                                  + DigiKey list URL if the user is logged in
-                                  + digikey_login_url if they're not
+                                  + DigiKey third-party single-use list URL when
+                                    matched rows include DigiKey part numbers
 """
 from __future__ import annotations
 
@@ -148,10 +148,9 @@ async def enrich(
     list_name: Optional[str] = Form(default=None),
     boma_session: Optional[str] = Cookie(default=None),
 ) -> JSONResponse:
-    """Parse the uploaded CSV, run the agent pipeline, and — if the user
-    is logged into DigiKey — push the selected parts into a new MyList in
-    their account. Always returns the enriched parts + per-row reasoning;
-    `list_url` is present only when login + list creation both succeed."""
+    """Parse the uploaded CSV, run the agent pipeline, then build a DigiKey
+    third-party MyList (no login). Returns enriched parts, summary, and
+    ``list_url`` (single-use link) when list creation succeeds."""
     suffix = Path(file.filename or "bom.csv").suffix or ".csv"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(await file.read())
@@ -171,38 +170,29 @@ async def enrich(
         "total_cost_usd": summary.get("total_cost_usd"),
     }
 
-    access_token = get_valid_access_token(boma_session) if boma_session else None
-    if not access_token:
-        # Tell the frontend to send the user through the login flow before
-        # we can build the DigiKey list. Everything else (matches, prices,
-        # reasoning) is still in the response so the UI can preview.
-        login_url = str(request.url_for("digikey_login"))
-        response["digikey_login_required"] = True
-        response["digikey_login_url"] = login_url
-        return JSONResponse(response)
-
-    # Build the parts payload for myLists from the rows that have a DKPN.
     list_parts = [
         {
             "part_number": p.get("digikey_part_number") or "",
             "quantity": int(p.get("quantity") or 1),
             "designator": p.get("designator") or "",
-            "notes": (p.get("match_reason") or "")[:200],
+            "notes": (p.get("match_reason") or "")[:500],
         }
         for p in parts
         if p.get("digikey_part_number")
     ]
 
-    name = list_name or (Path(file.filename or "BOMA list").stem or "BOMA list")
-    try:
-        list_info = digikey_lists.create_list_with_parts(
-            access_token=access_token,
-            list_name=f"BOMA — {name}",
-            parts=list_parts,
-        )
-        response["digikey_list"] = list_info
-        response["list_url"] = list_info.get("list_url")
-    except digikey_lists.DigiKeyListError as e:
-        response["digikey_list_error"] = str(e)
+    if list_parts:
+        name = list_name or (Path(file.filename or "BOMA list").stem or "BOMA list")
+        try:
+            list_info = digikey_lists.create_list_with_parts(
+                list_name=f"BOMA — {name}",
+                parts=list_parts,
+            )
+            response["digikey_list"] = list_info
+            response["list_url"] = list_info.get("list_url") or list_info.get(
+                "single_use_url"
+            )
+        except digikey_lists.DigiKeyListError as e:
+            response["digikey_list_error"] = str(e)
 
     return JSONResponse(response)

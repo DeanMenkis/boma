@@ -140,8 +140,8 @@ def main() -> None:
     _print_warnings(console, result)
     _print_summary(console, result)
     console.print(
-        "\n[dim]CLI cannot create a DigiKey list (myLists requires a per-user OAuth login). "
-        "Run the FastAPI app and visit /digikey/login to enable list creation.[/dim]"
+        "\n[dim]DigiKey third-party MyLists (single-use URL) are created from the "
+        "FastAPI POST /enrich flow when rows include DigiKey part numbers.[/dim]"
     )
 
 
