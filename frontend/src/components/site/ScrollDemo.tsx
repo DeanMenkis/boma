@@ -552,3 +552,5 @@ function ScrollDemoStatic() {
     </section>
   );
 }
+
+export default ScrollDemo;

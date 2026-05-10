@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Header } from "@/components/site/Header";
 import { Footer } from "@/components/site/Footer";
-import { HomeScrollDemo } from "@/components/site/HomeScrollDemo";
+import HomeScrollDemo from "@/components/site/HomeScrollDemo";
 import { Button } from "@/components/ui/button";
 import {
   formatMarketingCurrency,

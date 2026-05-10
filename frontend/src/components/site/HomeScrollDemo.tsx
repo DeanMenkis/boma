@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 
-const ScrollDemo = dynamic(() => import("./ScrollDemo").then((m) => ({ default: m.ScrollDemo })), {
+const ScrollDemo = dynamic(() => import("./ScrollDemo"), {
   ssr: false,
   loading: () => <ScrollDemoSkeleton />,
 });
@@ -21,6 +21,6 @@ function ScrollDemoSkeleton() {
   );
 }
 
-export function HomeScrollDemo() {
+export default function HomeScrollDemo() {
   return <ScrollDemo />;
 }

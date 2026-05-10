@@ -12,19 +12,20 @@ const firebaseConfig = {
 };
 
 /** Required for Firebase Auth; measurementId is optional (Analytics). */
-const REQUIRED_ENV_KEYS = [
-  "NEXT_PUBLIC_FIREBASE_API_KEY",
-  "NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN",
-  "NEXT_PUBLIC_FIREBASE_PROJECT_ID",
-  "NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET",
-  "NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID",
-  "NEXT_PUBLIC_FIREBASE_APP_ID",
-] as const;
-
 function missingFirebaseEnvKeys(): string[] {
+  // Validate using `firebaseConfig` fields, not `process.env[key]`. Next.js only
+  // inlines NEXT_PUBLIC_* at compile time for static lookups; dynamic indexing
+  // stays undefined in the browser bundle and falsely trips this check.
+  const checks: [string, string | undefined][] = [
+    ["NEXT_PUBLIC_FIREBASE_API_KEY", firebaseConfig.apiKey],
+    ["NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN", firebaseConfig.authDomain],
+    ["NEXT_PUBLIC_FIREBASE_PROJECT_ID", firebaseConfig.projectId],
+    ["NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET", firebaseConfig.storageBucket],
+    ["NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID", firebaseConfig.messagingSenderId],
+    ["NEXT_PUBLIC_FIREBASE_APP_ID", firebaseConfig.appId],
+  ];
   const missing: string[] = [];
-  for (const key of REQUIRED_ENV_KEYS) {
-    const v = process.env[key];
+  for (const [key, v] of checks) {
     if (v === undefined || String(v).trim() === "") missing.push(key);
   }
   return missing;
