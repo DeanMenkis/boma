@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
   Bookmark,
+  Check,
   ExternalLink,
   FileSpreadsheet,
   Loader2,
@@ -16,6 +17,7 @@ import {
 import { Header } from "@/components/site/Header";
 import { Footer } from "@/components/site/Footer";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSavedBoms } from "@/hooks/useSavedBoms";
 import type { BomCartRow, SavedBom } from "@/lib/bom-types";
@@ -93,7 +95,9 @@ export function BomAgentPage() {
   const [running, setRunning] = useState(false);
   const [rows, setRows] = useState<BomCartRow[] | null>(null);
   const [drag, setDrag] = useState(false);
+  const [saveAcknowledged, setSaveAcknowledged] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const saveFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const onSavedBomLoaded = useCallback((bom: SavedBom) => {
     setRows(bom.rows);
@@ -119,14 +123,24 @@ export function BomAgentPage() {
 
   const subtotal = rows?.reduce((s, r) => s + r.qty * r.unit, 0) ?? 0;
 
-  const saveToProfile = () => {
-    if (!rows || !user?.uid) return;
+  useEffect(() => {
+    return () => {
+      if (saveFlashTimerRef.current) clearTimeout(saveFlashTimerRef.current);
+    };
+  }, []);
+
+  const saveToProfile = useCallback(() => {
+    if (!rows?.length || !user?.uid) return;
     const baseName =
       file?.name?.replace(/\.[^.]+$/, "") ??
       sourceLabel ??
       `Cart · ${new Date().toLocaleDateString()}`;
+    const id =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `bom-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
     saveSavedBom({
-      id: crypto.randomUUID(),
+      id,
       title: baseName,
       sourceFileName: file?.name ?? null,
       savedAt: new Date().toISOString(),
@@ -134,7 +148,13 @@ export function BomAgentPage() {
       subtotal,
       rows,
     });
-  };
+    if (saveFlashTimerRef.current) clearTimeout(saveFlashTimerRef.current);
+    setSaveAcknowledged(true);
+    saveFlashTimerRef.current = setTimeout(() => {
+      setSaveAcknowledged(false);
+      saveFlashTimerRef.current = null;
+    }, 800);
+  }, [rows, user?.uid, file, sourceLabel, subtotal, saveSavedBom]);
 
   const uploadCaption = file?.name ?? sourceLabel;
 
@@ -230,9 +250,28 @@ export function BomAgentPage() {
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   {user ? (
-                    <Button variant="glass" size="sm" onClick={saveToProfile} className="gap-1.5">
-                      <Bookmark className="h-4 w-4" />
-                      Save to profile
+                    <Button
+                      type="button"
+                      variant="glass"
+                      size="sm"
+                      onClick={saveToProfile}
+                      aria-live="polite"
+                      className={cn(
+                        "gap-1.5 transition-[color,box-shadow,border-color] duration-200",
+                        saveAcknowledged && "save-to-profile-gold-flash",
+                      )}
+                    >
+                      {saveAcknowledged ? (
+                        <>
+                          <Check className="h-4 w-4 text-amber-300" aria-hidden />
+                          Saved to profile
+                        </>
+                      ) : (
+                        <>
+                          <Bookmark className="h-4 w-4" aria-hidden />
+                          Save to profile
+                        </>
+                      )}
                     </Button>
                   ) : (
                     <Button variant="glass" size="sm" asChild>

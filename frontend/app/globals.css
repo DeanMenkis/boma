@@ -186,3 +186,28 @@
   background-size: 200% 100%;
   animation: shimmer 2s linear infinite;
 }
+
+/** Brief gold pulse on “Save to profile” so the save feels acknowledged. */
+@keyframes gold-save-flash {
+  0% {
+    box-shadow: 0 0 0 0 oklch(0.82 0.14 85 / 0%);
+    border-color: var(--border);
+    color: inherit;
+  }
+  40% {
+    box-shadow:
+      0 0 0 1px oklch(0.78 0.14 85 / 0.65),
+      0 0 22px oklch(0.78 0.12 85 / 0.35);
+    border-color: oklch(0.78 0.12 85 / 0.85);
+    color: oklch(0.93 0.08 90);
+  }
+  100% {
+    box-shadow: 0 0 0 0 oklch(0.82 0.14 85 / 0%);
+    border-color: var(--border);
+    color: inherit;
+  }
+}
+
+.save-to-profile-gold-flash {
+  animation: gold-save-flash 0.75s ease-out;
+}
