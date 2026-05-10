@@ -6,7 +6,8 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Optional
 
 from openai import OpenAI
 
@@ -38,20 +39,21 @@ For each row you process, log:
 SPECIALIST_SYSTEM = """You are a specialist electronics component matching agent. You will receive:
 - A single BOM row describing what part is needed
 - A list of candidate parts found on DigiKey
-- The project deadline in days (how long the user has to receive all parts)
+- The project deadline in days (how long the user has to receive all parts).
+  May be the literal string "none" — meaning the user did not give a deadline.
 
 Your job is to select the best candidate considering ALL of these factors:
 1. Technical match — does the part actually match what's specified? (value, footprint, voltage rating, package, tolerance)
-2. Availability — is it in stock? If lead_time_weeks * 7 > deadline_days, this part CANNOT arrive in time — heavily penalize or eliminate it
+2. Availability — is it in stock? If a deadline was given and lead_time_weeks * 7 + 3 > deadline_days, this part CANNOT arrive in time — heavily penalize or eliminate it
 3. Price — lower unit price is better, but not at the cost of a wrong part
 4. Stock quantity — make sure stock >= quantity needed
 
 Deadline logic you must apply:
-- Convert lead_time_weeks to days: lead_days = lead_time_weeks * 7
-- Add 3 days for shipping: total_days = lead_days + 3
-- If total_days > deadline_days: mark this candidate as CANNOT_MEET_DEADLINE
-- Among candidates that CAN meet the deadline, pick the best technical + price match
-- If NO candidate can meet the deadline, pick the closest one and flag it with a warning
+- If deadline is "none": skip the deadline filter entirely. Among technically-matching, in-stock candidates pick the cheapest. Set "meets_deadline": true.
+- Otherwise: convert lead_time_weeks to days (lead_days = lead_time_weeks * 7), add 3 days shipping (total_days = lead_days + 3).
+  - If total_days > deadline_days: this candidate CANNOT_MEET_DEADLINE.
+  - Among candidates that CAN meet the deadline, prefer the cheapest *that arrives soonest*.
+  - If NO candidate can meet the deadline, pick the soonest-arriving one and flag deadline_warning.
 
 Respond ONLY with a JSON object (no markdown, no explanation outside the JSON):
 {
@@ -212,103 +214,151 @@ def _dispatch_tool(
     return json.dumps({"error": "unknown tool"}), acc_candidates
 
 
-def orchestrator_agent(bom_rows: list[dict], deadline_days: int) -> list[dict]:
+def _orchestrate_row(row: dict, deadline_days: Optional[int], use_real: bool) -> dict:
+    """Run the orchestrator tool loop for a single BOM row.
+    Returns {"row": row, "candidates": [...], "orchestrator_search_summary": str}.
+
+    Pure per-row work so this function is safe to run concurrently from a
+    ThreadPoolExecutor (each call gets its own OpenAI client + message list).
     """
-    Stage 1: for each row, run tool loop with CLōD until submit_candidates or max rounds.
-    """
-    use_real = _digikey_ready()
+    rid = int(row["id"])
+    name = row.get("name") or ""
     client = _clod_client()
     tools = _tool_specs()
-    results: list[dict] = []
+    acc: list[dict] = []
+    submitted_summary = ""
+    submitted = False
 
-    for row in bom_rows:
-        rid = int(row["id"])
-        name = row.get("name") or ""
-        acc: list[dict] = []
-        submitted_summary = ""
-        submitted = False
-        messages: list[dict] = [
-            {"role": "system", "content": ORCHESTRATOR_SYSTEM},
-            {
-                "role": "user",
-                "content": (
-                    f"Process this single BOM row (deadline context for planning: {deadline_days} days).\n"
-                    f"Row JSON:\n{json.dumps(row, indent=2)}\n\n"
-                    "Use the tools, then call submit_candidates with row_id matching this row's id "
-                    "and the full deduplicated candidate list you collected."
-                ),
-            },
-        ]
+    deadline_text = (
+        f"deadline context for planning: {deadline_days} days"
+        if deadline_days is not None
+        else "no project deadline supplied — optimize for cheapest in-stock part"
+    )
 
-        for iteration in range(4):
-            resp = client.chat.completions.create(
-                model=ORCHESTRATOR_MODEL,
-                messages=messages,
-                tools=tools,
-                tool_choice="auto",
-            )
-            msg = resp.choices[0].message
-            entry: dict[str, Any] = {"role": msg.role, "content": msg.content}
-            if msg.tool_calls:
-                entry["tool_calls"] = [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-                    }
-                    for tc in msg.tool_calls
-                ]
-            messages.append(entry)
+    messages: list[dict] = [
+        {"role": "system", "content": ORCHESTRATOR_SYSTEM},
+        {
+            "role": "user",
+            "content": (
+                f"Process this single BOM row ({deadline_text}).\n"
+                f"Row JSON:\n{json.dumps(row, indent=2)}\n\n"
+                "Use the tools, then call submit_candidates with row_id matching this row's id "
+                "and the full deduplicated candidate list you collected."
+            ),
+        },
+    ]
 
-            if not msg.tool_calls:
-                break
-
-            for tc in msg.tool_calls:
-                fname = tc.function.name
-                try:
-                    args = json.loads(tc.function.arguments or "{}")
-                except json.JSONDecodeError:
-                    args = {}
-                if fname == "submit_candidates":
-                    _msg, acc = _dispatch_tool(fname, args, row, acc, use_real)
-                    submitted_summary = args.get("search_summary", "")
-                    submitted = True
-                    tool_content = _msg
-                else:
-                    tool_content, acc = _dispatch_tool(fname, args, row, acc, use_real)
-
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": tool_content,
-                    }
-                )
-
-            if submitted:
-                break
-
-        strategy = (
-            submitted_summary.strip()
-            if submitted_summary
-            else (
-                "completed tool searches (no submit_candidates summary text)"
-                if submitted
-                else "stopped after max 4 iterations without submit_candidates"
-            )
+    for _ in range(4):
+        resp = client.chat.completions.create(
+            model=ORCHESTRATOR_MODEL,
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
         )
-        n = len(acc)
-        print(f"[ORCHESTRATOR] Row {rid} ({name}): strategy = {strategy}")
-        print(f"[ORCHESTRATOR] Row {rid} ({name}): {n} candidates collected")
-        results.append(
-            {
-                "row": row,
-                "candidates": acc,
-                "orchestrator_search_summary": submitted_summary,
-            }
-        )
+        msg = resp.choices[0].message
+        entry: dict[str, Any] = {"role": msg.role, "content": msg.content}
+        if msg.tool_calls:
+            entry["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                }
+                for tc in msg.tool_calls
+            ]
+        messages.append(entry)
 
-    return results
+        if not msg.tool_calls:
+            break
+
+        for tc in msg.tool_calls:
+            fname = tc.function.name
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            if fname == "submit_candidates":
+                _msg, acc = _dispatch_tool(fname, args, row, acc, use_real)
+                submitted_summary = args.get("search_summary", "")
+                submitted = True
+                tool_content = _msg
+            else:
+                tool_content, acc = _dispatch_tool(fname, args, row, acc, use_real)
+
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": tool_content,
+                }
+            )
+
+        if submitted:
+            break
+
+    strategy = (
+        submitted_summary.strip()
+        if submitted_summary
+        else (
+            "completed tool searches (no submit_candidates summary text)"
+            if submitted
+            else "stopped after max 4 iterations without submit_candidates"
+        )
+    )
+    print(f"[ORCHESTRATOR] Row {rid} ({name}): strategy = {strategy}")
+    print(f"[ORCHESTRATOR] Row {rid} ({name}): {len(acc)} candidates collected")
+
+    return {
+        "row": row,
+        "candidates": acc,
+        "orchestrator_search_summary": submitted_summary,
+    }
+
+
+# Cap concurrency so we don't hammer CLōD or DigiKey rate limits even when
+# someone uploads a 100-row BOM.
+_ORCHESTRATOR_MAX_WORKERS = int(os.getenv("BOMA_ORCHESTRATOR_MAX_WORKERS", "10"))
+
+
+def orchestrator_agent(
+    bom_rows: list[dict], deadline_days: Optional[int]
+) -> list[dict]:
+    """Stage 1: spin up one orchestrator agent per BOM row in parallel.
+
+    Each row gets its own CLōD tool loop. Results are reordered to match the
+    original row order so downstream stages stay deterministic.
+    """
+    use_real = _digikey_ready()
+    if not bom_rows:
+        return []
+
+    workers = min(len(bom_rows), max(1, _ORCHESTRATOR_MAX_WORKERS))
+    print(
+        f"[ORCHESTRATOR] dispatching {len(bom_rows)} rows across {workers} parallel workers"
+    )
+
+    results_by_id: dict[int, dict] = {}
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(_orchestrate_row, row, deadline_days, use_real): int(row["id"])
+            for row in bom_rows
+        }
+        for fut in as_completed(futures):
+            rid = futures[fut]
+            try:
+                results_by_id[rid] = fut.result()
+            except Exception as e:
+                # Don't let one bad row kill the whole sourcing run.
+                print(f"[ORCHESTRATOR] Row {rid}: ERROR — {e}")
+                # Re-find the row so the specialist still gets to run with no candidates.
+                row = next(r for r in bom_rows if int(r["id"]) == rid)
+                results_by_id[rid] = {
+                    "row": row,
+                    "candidates": [],
+                    "orchestrator_search_summary": f"orchestrator crashed: {e}",
+                }
+
+    return [results_by_id[int(r["id"])] for r in bom_rows]
 
 
 def _parse_json_object(text: str) -> dict:
@@ -319,10 +369,17 @@ def _parse_json_object(text: str) -> dict:
     return json.loads(text)
 
 
-def specialist_agent(row: dict, candidates: list[dict], deadline_days: int) -> dict:
-    """Stage 2: pick best candidate; merge decision fields into the BOM row."""
+def specialist_agent(
+    row: dict, candidates: list[dict], deadline_days: Optional[int]
+) -> dict:
+    """Stage 2: pick best candidate; merge decision fields into the BOM row.
+
+    `deadline_days=None` means the user didn't give a deadline — pick the
+    cheapest in-stock part and treat meets_deadline as True.
+    """
     rid = int(row["id"])
     name = row.get("name") or ""
+    no_deadline = deadline_days is None
 
     if not candidates:
         merged = dict(row)
@@ -340,19 +397,31 @@ def specialist_agent(row: dict, candidates: list[dict], deadline_days: int) -> d
                 "deadline_warning": "No candidates from orchestrator or mock catalog.",
                 "supplier_name": "DigiKey",
                 "buy_url": "",
+                "digikey_part_number": "",
                 "match_confidence": "low",
                 "match_reason": "No parts to evaluate.",
             }
         )
+        deadline_label = "no deadline" if no_deadline else f"{deadline_days}d project window"
         print(
             f"[SPECIALIST] Row {rid} ({name}): selected (none) @ $0.0 | meets deadline: False | confidence: low"
         )
         print(
-            f"[SPECIALIST] Row {rid} ({name}): deadline assessment: no candidates vs {deadline_days}d project window"
+            f"[SPECIALIST] Row {rid} ({name}): deadline assessment: no candidates vs {deadline_label}"
         )
         return merged
 
     numbered = [{"index": i, **c} for i, c in enumerate(candidates)]
+    deadline_block = (
+        f"Project deadline: {deadline_days} days from today.\n"
+        f"Parts must arrive within {deadline_days} days (include ~3 days shipping)."
+        if not no_deadline
+        else (
+            "Project deadline: none — the user did not give a deadline.\n"
+            "Pick the cheapest in-stock candidate that technically matches. "
+            'Set "meets_deadline": true.'
+        )
+    )
     user = f"""BOM Row:
   Name: {row.get("name")}
   Footprint: {row.get("footprint")}
@@ -361,8 +430,7 @@ def specialist_agent(row: dict, candidates: list[dict], deadline_days: int) -> d
   Manufacturer: {row.get("manufacturer") or "not provided"}
   Supplier Part: {row.get("supplier_part") or "not provided"}
 
-Project deadline: {deadline_days} days from today.
-Parts must arrive within {deadline_days} days (include ~3 days shipping).
+{deadline_block}
 
 Candidates from DigiKey:
 {json.dumps(numbered, indent=2)}
@@ -380,22 +448,40 @@ Candidates from DigiKey:
     try:
         decision = _parse_json_object(raw)
     except json.JSONDecodeError:
+        # Fallback to cheapest in-stock candidate. Compute meets_deadline
+        # honestly when a deadline was given (previously hard-coded True,
+        # which silently broke Step 2's availability check on parse errors).
+        in_stock = [
+            (i, c) for i, c in enumerate(candidates)
+            if int(c.get("stock") or 0) >= int(row.get("quantity") or 1)
+        ] or list(enumerate(candidates))
+        idx, pick = min(
+            in_stock, key=lambda ic: float(ic[1].get("unit_price") or 0) or 1e9
+        )
+        first_lead_weeks = float(pick.get("lead_time_weeks") or 0)
+        first_arrival_days = int(first_lead_weeks * 7 + 3)
+        meets = True if no_deadline else first_arrival_days <= deadline_days
+        late_msg = (
+            ""
+            if no_deadline or meets
+            else f" Estimated arrival {first_arrival_days}d exceeds deadline {deadline_days}d."
+        )
         decision = {
-            "selected_index": 0,
-            "matched_mpn": candidates[0].get("mpn", ""),
-            "matched_description": candidates[0].get("description", ""),
-            "unit_price": float(candidates[0].get("unit_price") or 0),
-            "total_price": float(candidates[0].get("unit_price") or 0)
+            "selected_index": idx,
+            "matched_mpn": pick.get("mpn", ""),
+            "matched_description": pick.get("description", ""),
+            "unit_price": float(pick.get("unit_price") or 0),
+            "total_price": float(pick.get("unit_price") or 0)
             * int(row.get("quantity") or 1),
-            "stock": int(candidates[0].get("stock") or 0),
-            "lead_time_weeks": float(candidates[0].get("lead_time_weeks") or 0),
-            "estimated_arrival_days": int(float(candidates[0].get("lead_time_weeks") or 0) * 7 + 3),
-            "meets_deadline": True,
-            "deadline_warning": "Model returned non-JSON; defaulted to first candidate.",
+            "stock": int(pick.get("stock") or 0),
+            "lead_time_weeks": first_lead_weeks,
+            "estimated_arrival_days": first_arrival_days,
+            "meets_deadline": meets,
+            "deadline_warning": "Model returned non-JSON; defaulted to cheapest in-stock candidate." + late_msg,
             "supplier_name": "DigiKey",
-            "buy_url": candidates[0].get("product_url", ""),
+            "buy_url": pick.get("product_url", ""),
             "match_confidence": "low",
-            "match_reason": "JSON parse failed; conservative fallback to index 0.",
+            "match_reason": "JSON parse failed; conservative fallback to cheapest in-stock candidate.",
         }
 
     idx = int(decision.get("selected_index", 0))
@@ -405,7 +491,15 @@ Candidates from DigiKey:
 
     pick = candidates[idx]
     qty = int(row.get("quantity") or 1)
-    unit = float(decision.get("unit_price", pick.get("unit_price") or 0))
+    # Coalesce to handle the model returning explicit JSON nulls — `dict.get`
+    # only falls back to its default when the key is *missing*, not when its
+    # value is None, which used to crash float()/int() conversions.
+    unit = float(_coerce_num(decision.get("unit_price"), pick.get("unit_price"), 0))
+    total = float(_coerce_num(decision.get("total_price"), unit * qty, 0))
+    stock = int(_coerce_num(decision.get("stock"), pick.get("stock"), 0))
+    lead_weeks = float(_coerce_num(decision.get("lead_time_weeks"), pick.get("lead_time_weeks"), 0))
+    arrival_days = int(_coerce_num(decision.get("estimated_arrival_days"), int(lead_weeks * 7 + 3), 0))
+
     merged = dict(row)
     merged.update(
         {
@@ -414,21 +508,16 @@ Candidates from DigiKey:
             "matched_description": decision.get("matched_description")
             or pick.get("description", ""),
             "unit_price": unit,
-            "total_price": float(decision.get("total_price", unit * qty)),
-            "stock": int(decision.get("stock", pick.get("stock") or 0)),
-            "lead_time_weeks": float(
-                decision.get("lead_time_weeks", pick.get("lead_time_weeks") or 0)
-            ),
-            "estimated_arrival_days": int(
-                decision.get(
-                    "estimated_arrival_days",
-                    int(float(pick.get("lead_time_weeks") or 0) * 7 + 3),
-                )
-            ),
+            "total_price": total,
+            "stock": stock,
+            "lead_time_weeks": lead_weeks,
+            "estimated_arrival_days": arrival_days,
             "meets_deadline": bool(decision.get("meets_deadline", False)),
             "deadline_warning": decision.get("deadline_warning"),
             "supplier_name": decision.get("supplier_name", "DigiKey"),
             "buy_url": decision.get("buy_url") or pick.get("product_url", ""),
+            # Carry the DKPN through so we can add this part to a DigiKey list later.
+            "digikey_part_number": pick.get("digikey_part_number", ""),
             "match_confidence": decision.get("match_confidence", "medium"),
             "match_reason": decision.get("match_reason", ""),
         }
@@ -438,10 +527,25 @@ Candidates from DigiKey:
         f"[SPECIALIST] Row {rid} ({name}): selected {merged.get('matched_mpn')} @ ${merged.get('unit_price')} "
         f"| meets deadline: {merged.get('meets_deadline')} | confidence: {merged.get('match_confidence')}"
     )
-    ld = int(float(merged.get("lead_time_weeks") or 0) * 7)
+    ld = int(lead_weeks * 7)
     tot = ld + 3
+    deadline_label = "no deadline" if no_deadline else f"{deadline_days}d project window"
     print(
         f"[SPECIALIST] Row {rid} ({name}): deadline assessment: ~{tot} days to arrival "
-        f"(lead {ld}d + 3d ship) vs {deadline_days}d project window"
+        f"(lead {ld}d + 3d ship) vs {deadline_label}"
     )
     return merged
+
+
+def _coerce_num(*candidates_: Any) -> float:
+    """Return the first numeric, non-None argument, else 0.
+    Used to defend against the LLM returning explicit `null` for numeric
+    fields, which would otherwise crash float()/int() conversions."""
+    for v in candidates_:
+        if v is None:
+            continue
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            continue
+    return 0.0

@@ -115,7 +115,12 @@ def _print_summary(console: Console, result: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Enrich a BOM via DigiKey + CLōD agents.")
     parser.add_argument("csv_filepath", nargs="?", help="Path to BOM CSV")
-    parser.add_argument("--deadline", type=int, default=30, help="Project deadline in days")
+    parser.add_argument(
+        "--deadline",
+        type=int,
+        default=None,
+        help="Project deadline in days. Omit to ignore deadline and pick cheapest.",
+    )
     args = parser.parse_args()
     console = Console()
 
@@ -124,9 +129,9 @@ def main() -> None:
             result = enrich_bom(args.csv_filepath, args.deadline)
         else:
             console.print(
-                "[dim]No CSV provided — running built-in test (3 rows, deadline_days=15).[/dim]\n"
+                "[dim]No CSV provided — running built-in test (3 rows, no deadline).[/dim]\n"
             )
-            result = enrich_bom_rows(_builtin_rows(), 15)
+            result = enrich_bom_rows(_builtin_rows(), args.deadline)
     except RuntimeError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise SystemExit(1) from e
@@ -134,6 +139,10 @@ def main() -> None:
     _print_table(console, result)
     _print_warnings(console, result)
     _print_summary(console, result)
+    console.print(
+        "\n[dim]CLI cannot create a DigiKey list (myLists requires a per-user OAuth login). "
+        "Run the FastAPI app and visit /digikey/login to enable list creation.[/dim]"
+    )
 
 
 if __name__ == "__main__":

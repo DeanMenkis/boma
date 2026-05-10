@@ -1,18 +1,68 @@
 """
 FastAPI service for BOM enrichment.
+
 Run from repository root:
-  uvicorn bom_supplier_connector.api:app --host 0.0.0.0 --port 8000
+  uvicorn bom_supplier_connector.api:app --host 0.0.0.0 --port 8000 \\
+      --ssl-keyfile dev-cert/key.pem --ssl-certfile dev-cert/cert.pem
+
+The TLS cert is required because DigiKey's OAuth callback MUST be https://.
+
+Endpoints:
+  GET  /health                    sanity check
+  GET  /digikey/login             302 redirect → DigiKey consent screen
+  GET  /digikey/callback          OAuth code exchange; sets boma_session cookie
+  GET  /digikey/status            { logged_in: bool }
+  POST /enrich                    multipart CSV upload → enriched BOM
+                                  + DigiKey list URL if the user is logged in
+                                  + digikey_login_url if they're not
 """
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
+from typing import Optional
+from urllib.parse import urlencode
 
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import Cookie, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, RedirectResponse
 
+from . import digikey_lists, digikey_oauth
+from .digikey_oauth import (
+    DigiKeyOAuthError,
+    build_authorize_url,
+    consume_oauth_state,
+    exchange_code,
+    get_valid_access_token,
+    new_oauth_state,
+    new_session_id,
+    store_tokens,
+)
 from .pipeline import enrich_bom
 
+SESSION_COOKIE = "boma_session"
+FRONTEND_BASE = os.getenv("BOMA_FRONTEND_URL", "http://localhost:3000")
+
 app = FastAPI(title="BOM Supplier Connector")
+
+
+@app.on_event("startup")
+def _log_oauth_redirect_uri() -> None:
+    """Log the exact redirect_uri sent to DigiKey — must match the developer portal."""
+    from .digikey_oauth import redirect_uri as _ru
+
+    print(f"[BOMA] OAuth redirect_uri (register this in DigiKey portal): {_ru()}")
+
+# Next.js dev runs on :3000 (sometimes :3001). Without this every browser
+# fetch is blocked by CORS even though the routes work fine from curl.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[FRONTEND_BASE, "http://localhost:3001"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
@@ -20,17 +70,139 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+# ---------------------------------------------------------------------------
+# DigiKey OAuth
+# ---------------------------------------------------------------------------
+
+@app.get("/digikey/login")
+def digikey_login() -> RedirectResponse:
+    """Step 1 of 3-legged OAuth: send the user to DigiKey's consent screen.
+
+    DigiKey will redirect them back to /digikey/callback?code=...&state=...
+    """
+    state = new_oauth_state()
+    return RedirectResponse(url=build_authorize_url(state), status_code=302)
+
+
+@app.get("/digikey/callback")
+def digikey_callback(
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    boma_session: Optional[str] = Cookie(default=None),
+) -> RedirectResponse:
+    """Step 2: DigiKey hits this with ?code=...&state=... after the user
+    consents. We swap the code for tokens, store them keyed by a session
+    cookie, and bounce the user back to the frontend."""
+    if error:
+        return _bounce_to_frontend(digikey=f"error:{error}")
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Missing code or state")
+    if not consume_oauth_state(state):
+        raise HTTPException(status_code=400, detail="Invalid or expired state")
+
+    try:
+        tokens = exchange_code(code)
+    except DigiKeyOAuthError as e:
+        return _bounce_to_frontend(digikey=f"error:{e}")
+
+    sid = boma_session or new_session_id()
+    store_tokens(sid, tokens)
+
+    response = _bounce_to_frontend(digikey="ok")
+    # The cookie is HTTPS-only because the whole API is HTTPS for OAuth anyway.
+    response.set_cookie(
+        SESSION_COOKIE,
+        sid,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=60 * 60 * 24 * 30,
+    )
+    return response
+
+
+@app.get("/digikey/status")
+def digikey_status(boma_session: Optional[str] = Cookie(default=None)) -> dict:
+    """Tells the frontend whether the current session has a valid DigiKey
+    token. Used to decide whether to show a 'Login with DigiKey' button."""
+    if not boma_session:
+        return {"logged_in": False}
+    return {"logged_in": get_valid_access_token(boma_session) is not None}
+
+
+def _bounce_to_frontend(**params: str) -> RedirectResponse:
+    qs = urlencode({k: v for k, v in params.items() if v})
+    return RedirectResponse(url=f"{FRONTEND_BASE}?{qs}", status_code=302)
+
+
+# ---------------------------------------------------------------------------
+# Enrich
+# ---------------------------------------------------------------------------
+
 @app.post("/enrich")
 async def enrich(
+    request: Request,
     file: UploadFile = File(...),
-    deadline_days: int = Form(30),
-) -> dict:
+    deadline_days: Optional[int] = Form(default=None),
+    list_name: Optional[str] = Form(default=None),
+    boma_session: Optional[str] = Cookie(default=None),
+) -> JSONResponse:
+    """Parse the uploaded CSV, run the agent pipeline, and — if the user
+    is logged into DigiKey — push the selected parts into a new MyList in
+    their account. Always returns the enriched parts + per-row reasoning;
+    `list_url` is present only when login + list creation both succeed."""
     suffix = Path(file.filename or "bom.csv").suffix or ".csv"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        content = await file.read()
-        tmp.write(content)
+        tmp.write(await file.read())
         tmp_path = tmp.name
+
     try:
-        return enrich_bom(tmp_path, deadline_days)
+        result = enrich_bom(tmp_path, deadline_days)
     finally:
         Path(tmp_path).unlink(missing_ok=True)
+
+    parts = result.get("parts", [])
+    summary = result.get("summary", {})
+    response: dict = {
+        "parts": parts,
+        "summary": summary,
+        "deadline_days": deadline_days,
+        "total_cost_usd": summary.get("total_cost_usd"),
+    }
+
+    access_token = get_valid_access_token(boma_session) if boma_session else None
+    if not access_token:
+        # Tell the frontend to send the user through the login flow before
+        # we can build the DigiKey list. Everything else (matches, prices,
+        # reasoning) is still in the response so the UI can preview.
+        login_url = str(request.url_for("digikey_login"))
+        response["digikey_login_required"] = True
+        response["digikey_login_url"] = login_url
+        return JSONResponse(response)
+
+    # Build the parts payload for myLists from the rows that have a DKPN.
+    list_parts = [
+        {
+            "part_number": p.get("digikey_part_number") or "",
+            "quantity": int(p.get("quantity") or 1),
+            "designator": p.get("designator") or "",
+            "notes": (p.get("match_reason") or "")[:200],
+        }
+        for p in parts
+        if p.get("digikey_part_number")
+    ]
+
+    name = list_name or (Path(file.filename or "BOMA list").stem or "BOMA list")
+    try:
+        list_info = digikey_lists.create_list_with_parts(
+            access_token=access_token,
+            list_name=f"BOMA — {name}",
+            parts=list_parts,
+        )
+        response["digikey_list"] = list_info
+        response["list_url"] = list_info.get("list_url")
+    except digikey_lists.DigiKeyListError as e:
+        response["digikey_list_error"] = str(e)
+
+    return JSONResponse(response)

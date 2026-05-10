@@ -6,7 +6,7 @@ from __future__ import annotations
 import csv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from .agents import orchestrator_agent, specialist_agent
 from .mock_search import merge_mock_if_empty
@@ -58,9 +58,10 @@ def _apply_mock_fallback(orch: list[dict]) -> list[dict]:
     return merged
 
 
-def _specialists_parallel(merged: list[dict], deadline_days: int) -> list[dict]:
+def _specialists_parallel(merged: list[dict], deadline_days: Optional[int]) -> list[dict]:
     parts: list[dict] = []
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    workers = min(max(1, len(merged)), 10)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
         futs = {
             pool.submit(specialist_agent, m["row"], m["candidates"], deadline_days): m["row"]["id"]
             for m in merged
@@ -73,7 +74,7 @@ def _specialists_parallel(merged: list[dict], deadline_days: int) -> list[dict]:
     return parts
 
 
-def _build_summary(parts: list[dict], deadline_days: int) -> dict[str, Any]:
+def _build_summary(parts: list[dict], deadline_days: Optional[int]) -> dict[str, Any]:
     total_cost = 0.0
     parts_found = 0
     parts_missing = 0
@@ -100,16 +101,18 @@ def _build_summary(parts: list[dict], deadline_days: int) -> dict[str, Any]:
     }
 
 
-def enrich_bom(filepath: str, deadline_days: int) -> dict[str, Any]:
+def enrich_bom(
+    filepath: str, deadline_days: Optional[int] = None
+) -> dict[str, Any]:
     rows = parse_bom_csv(filepath)
-    orch = orchestrator_agent(rows, deadline_days)
-    merged = _apply_mock_fallback(orch)
-    parts = _specialists_parallel(merged, deadline_days)
-    return {"parts": parts, "summary": _build_summary(parts, deadline_days)}
+    return enrich_bom_rows(rows, deadline_days)
 
 
-def enrich_bom_rows(rows: list[dict], deadline_days: int) -> dict[str, Any]:
-    """Same as enrich_bom but from in-memory rows (used by the built-in CLI test)."""
+def enrich_bom_rows(
+    rows: list[dict], deadline_days: Optional[int] = None
+) -> dict[str, Any]:
+    """Run the orchestrator (parallel per row) + specialist (parallel) on
+    in-memory rows. `deadline_days=None` means "no deadline; pick cheapest"."""
     orch = orchestrator_agent(rows, deadline_days)
     merged = _apply_mock_fallback(orch)
     parts = _specialists_parallel(merged, deadline_days)

@@ -5,3 +5,6 @@ venv/
 env/
 .vscode/
 .idea/
+frontend/node_modules/
+frontend/.next/
+dev-cert/
