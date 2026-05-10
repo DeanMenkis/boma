@@ -14,7 +14,7 @@ Setup the user must do once in the DigiKey developer portal:
 For local dev, run uvicorn with a self-signed cert so the callback URL is
 reachable over https. See README.
 
-This module only handles the token dance. List creation lives in
+This module only handles the token dance. Third-party MyLists (no auth) live in
 `digikey_lists.py`. Token storage is in-memory and keyed by an opaque
 `session_id` cookie set in `api.py`.
 """
