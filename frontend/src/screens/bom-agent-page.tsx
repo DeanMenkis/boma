@@ -4,7 +4,14 @@ import { Header } from "@/components/site/Header";
 import { Footer } from "@/components/site/Footer";
 import { Button } from "@/components/ui/button";
 import { useRef, useState } from "react";
-import { Upload, FileSpreadsheet, Sparkles, ShoppingCart, ExternalLink, Loader2 } from "lucide-react";
+import {
+  Upload,
+  FileSpreadsheet,
+  Sparkles,
+  ShoppingCart,
+  ExternalLink,
+  Loader2,
+} from "lucide-react";
 
 type Row = {
   part: string;
@@ -110,7 +117,9 @@ export function BomAgentPage() {
 
       <section className="mx-auto w-full max-w-6xl px-6 pt-12 pb-6">
         <p className="font-mono text-xs text-primary uppercase tracking-widest">Agent</p>
-        <h1 className="mt-2 font-display text-4xl md:text-5xl text-gradient">Run BOMA on your list.</h1>
+        <h1 className="mt-2 font-display text-4xl md:text-5xl text-gradient">
+          Run BOMA on your list.
+        </h1>
         <p className="mt-3 text-muted-foreground max-w-2xl">
           Upload a spreadsheet. We&apos;ll search DigiKey and Mouser for every part and build one
           priced cart.
@@ -156,7 +165,11 @@ export function BomAgentPage() {
                 onChange={(e) => onFile(e.target.files?.[0])}
               />
               <Button variant="hero" size="sm" disabled={!file || running} onClick={runAgent}>
-                {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                {running ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
                 {running ? "Agent running…" : "Run agent"}
               </Button>
             </div>
@@ -203,7 +216,10 @@ export function BomAgentPage() {
                   </thead>
                   <tbody>
                     {rows.map((r) => (
-                      <tr key={r.part} className="border-b border-border/60 last:border-0 hover:bg-surface-2/50">
+                      <tr
+                        key={r.part}
+                        className="border-b border-border/60 last:border-0 hover:bg-surface-2/50"
+                      >
                         <td className="px-6 py-3">
                           <div className="font-mono text-foreground">{r.part}</div>
                           <div className="text-xs text-muted-foreground">{r.desc}</div>

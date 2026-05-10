@@ -1,17 +1,9 @@
 import Link from "next/link";
 import { Header } from "@/components/site/Header";
 import { Footer } from "@/components/site/Footer";
+import { ScrollDemo } from "@/components/site/ScrollDemo";
 import { Button } from "@/components/ui/button";
-import {
-  ArrowRight,
-  Upload,
-  Sparkles,
-  ShoppingCart,
-  CircuitBoard,
-  Cpu,
-  Clock,
-  Check,
-} from "lucide-react";
+import { ArrowRight, ShoppingCart, CircuitBoard, Cpu, Clock, Check } from "lucide-react";
 
 export function HomePage() {
   return (
@@ -51,40 +43,10 @@ export function HomePage() {
               </Button>
             </Link>
           </div>
-
         </div>
       </section>
 
-      {/* Steps */}
-      <section className="mx-auto max-w-7xl px-6 py-24">
-        <div className="grid md:grid-cols-3 gap-6">
-          {[
-            {
-              icon: Upload,
-              title: "Upload your list",
-              body: "A spreadsheet with part names, quantities, and any notes.",
-            },
-            {
-              icon: Sparkles,
-              title: "Find every part",
-              body: "We search DigiKey and Mouser at the same time and check what's in stock.",
-            },
-            {
-              icon: ShoppingCart,
-              title: "Get a cart",
-              body: "One priced cart, with the price per part and a single shipping date.",
-            },
-          ].map(({ icon: Icon, title, body }) => (
-            <div key={title} className="rounded-xl border border-border bg-card p-6 shadow-card">
-              <div className="h-10 w-10 rounded-lg bg-surface-2 flex items-center justify-center text-primary">
-                <Icon className="h-5 w-5" />
-              </div>
-              <h3 className="mt-5 text-lg font-semibold">{title}</h3>
-              <p className="mt-2 text-sm text-muted-foreground">{body}</p>
-            </div>
-          ))}
-        </div>
-      </section>
+      <ScrollDemo />
 
       {/* Built for */}
       <section className="mx-auto max-w-7xl px-6 py-24 border-t border-border">
@@ -97,8 +59,8 @@ export function HomePage() {
               Skip the tab juggling.
             </h2>
             <p className="mt-5 text-muted-foreground">
-              Made for anyone tired of searching for parts one at a time and copying numbers
-              between tabs.
+              Made for anyone tired of searching for parts one at a time and copying numbers between
+              tabs.
             </p>
             <ul className="mt-6 space-y-3 text-sm font-mono">
               {[
