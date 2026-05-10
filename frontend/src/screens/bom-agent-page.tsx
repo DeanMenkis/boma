@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSavedBoms } from "@/hooks/useSavedBoms";
 import type { BomCartRow, SavedBom } from "@/lib/bom-types";
+import { setPendingCheckoutCart } from "@/lib/checkout-cart-storage";
 import { getSavedBom } from "@/lib/saved-boms-storage";
 
 const MOCK_ROWS: BomCartRow[] = [
@@ -87,6 +88,7 @@ const MOCK_ROWS: BomCartRow[] = [
 ];
 
 export function BomAgentPage() {
+  const router = useRouter();
   const { user } = useAuth();
   const { saveSavedBom } = useSavedBoms(user?.uid ?? null);
 
@@ -157,6 +159,16 @@ export function BomAgentPage() {
   }, [rows, user?.uid, file, sourceLabel, subtotal, saveSavedBom]);
 
   const uploadCaption = file?.name ?? sourceLabel;
+
+  const exportToCheckout = useCallback(() => {
+    if (!rows?.length) return;
+    setPendingCheckoutCart({
+      rows,
+      subtotal,
+      title: uploadCaption ?? undefined,
+    });
+    router.push("/app/checkout");
+  }, [rows, subtotal, router, uploadCaption]);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -278,7 +290,7 @@ export function BomAgentPage() {
                       <Link href="/login">Sign in to save</Link>
                     </Button>
                   )}
-                  <Button variant="hero" size="sm">
+                  <Button variant="hero" size="sm" type="button" onClick={exportToCheckout}>
                     <ShoppingCart className="h-4 w-4" /> Export cart
                   </Button>
                 </div>
