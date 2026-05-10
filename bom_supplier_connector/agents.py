@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional
 
@@ -21,6 +22,15 @@ from .mock_search import mock_keyword_search, mock_partnumber_search
 DEFAULT_CLOD_BASE_URL = "https://api.clod.io/v1"
 ORCHESTRATOR_MODEL = "claude-sonnet-4-20250514"
 SPECIALIST_MODEL = "claude-sonnet-4-20250514"
+
+
+def _ts() -> str:
+    return time.strftime("%H:%M:%S")
+
+
+def _log(msg: str) -> None:
+    print(f"[{_ts()}] {msg}", flush=True)
+
 
 ORCHESTRATOR_SYSTEM = """You are an electronics component sourcing agent. You will be given BOM rows one at a time. For each row, your job is to gather the best possible list of candidate parts from DigiKey by choosing smart search strategies.
 
@@ -173,9 +183,15 @@ def _dispatch_tool(
     use_real_digikey: bool,
 ) -> tuple[str, list[dict]]:
     """Returns (message_for_model, updated_acc_candidates)."""
+    rid = int(row.get("id") or 0)
     if name == "digikey_keyword_search":
         q = arguments.get("query", "")
         qty = int(arguments.get("quantity", row.get("quantity") or 1))
+        _log(
+            f"[ORCH row={rid}] tool=digikey_keyword_search qty={qty} query={q!r} "
+            f"(real_digikey={use_real_digikey}) …"
+        )
+        t0 = time.perf_counter()
         try:
             if use_real_digikey:
                 found = digikey_keyword_search(q, qty)
@@ -185,11 +201,21 @@ def _dispatch_tool(
             found = mock_keyword_search(q, qty)
         acc_candidates.extend(found)
         acc_candidates[:] = _dedupe_candidates(acc_candidates)
+        dt = time.perf_counter() - t0
+        _log(
+            f"[ORCH row={rid}] digikey_keyword_search done in {dt:.2f}s "
+            f"hits={len(found)} buffer={len(acc_candidates)}"
+        )
         return json.dumps({"count": len(found), "note": "merged into session buffer"}), acc_candidates
 
     if name == "digikey_partnumber_search":
         pn = arguments.get("part_number", "")
         qty = int(arguments.get("quantity", row.get("quantity") or 1))
+        _log(
+            f"[ORCH row={rid}] tool=digikey_partnumber_search qty={qty} pn={pn!r} "
+            f"(real_digikey={use_real_digikey}) …"
+        )
+        t0 = time.perf_counter()
         try:
             if use_real_digikey:
                 found = digikey_partnumber_search(pn, qty)
@@ -199,17 +225,36 @@ def _dispatch_tool(
             found = mock_partnumber_search(pn, qty)
         acc_candidates.extend(found)
         acc_candidates[:] = _dedupe_candidates(acc_candidates)
+        dt = time.perf_counter() - t0
+        _log(
+            f"[ORCH row={rid}] digikey_partnumber_search done in {dt:.2f}s "
+            f"hits={len(found)} buffer={len(acc_candidates)}"
+        )
         return json.dumps({"count": len(found), "note": "merged into session buffer"}), acc_candidates
 
     if name == "submit_candidates":
-        rid = int(row["id"])
+        rid_submit = int(row["id"])
         cand = arguments.get("candidates") or []
         summary = arguments.get("search_summary", "")
         if isinstance(cand, list) and len(cand) > 0:
             acc_candidates.clear()
             acc_candidates.extend(cand)
         acc_candidates[:] = _dedupe_candidates(acc_candidates)
-        return json.dumps({"status": "ok", "row_id": rid, "submitted": len(acc_candidates), "summary": summary}), acc_candidates
+        _log(
+            f"[ORCH row={rid_submit}] tool=submit_candidates payload_lines="
+            f"{len(cand) if isinstance(cand, list) else 0} buffer={len(acc_candidates)}"
+        )
+        return (
+            json.dumps(
+                {
+                    "status": "ok",
+                    "row_id": rid_submit,
+                    "submitted": len(acc_candidates),
+                    "summary": summary,
+                }
+            ),
+            acc_candidates,
+        )
 
     return json.dumps({"error": "unknown tool"}), acc_candidates
 
@@ -223,6 +268,10 @@ def _orchestrate_row(row: dict, deadline_days: Optional[int], use_real: bool) ->
     """
     rid = int(row["id"])
     name = row.get("name") or ""
+    _log(
+        f"[ORCH row={rid}] start orchestrator name={name!r} "
+        f"use_real_digikey={use_real} deadline_days={deadline_days!r}"
+    )
     client = _clod_client()
     tools = _tool_specs()
     acc: list[dict] = []
@@ -248,14 +297,25 @@ def _orchestrate_row(row: dict, deadline_days: Optional[int], use_real: bool) ->
         },
     ]
 
-    for _ in range(4):
+    for iter_idx in range(4):
+        _log(
+            f"[ORCH row={rid}] CLōD orchestrator chat.completions "
+            f"iteration {iter_idx + 1}/4 (model={ORCHESTRATOR_MODEL}) …"
+        )
+        t_llm = time.perf_counter()
         resp = client.chat.completions.create(
             model=ORCHESTRATOR_MODEL,
             messages=messages,
             tools=tools,
             tool_choice="auto",
         )
+        llm_dt = time.perf_counter() - t_llm
         msg = resp.choices[0].message
+        n_tools = len(msg.tool_calls or [])
+        _log(
+            f"[ORCH row={rid}] CLōD returned in {llm_dt:.2f}s "
+            f"tool_calls={n_tools} content_len={len((msg.content or ''))}"
+        )
         entry: dict[str, Any] = {"role": msg.role, "content": msg.content}
         if msg.tool_calls:
             entry["tool_calls"] = [
@@ -269,6 +329,7 @@ def _orchestrate_row(row: dict, deadline_days: Optional[int], use_real: bool) ->
         messages.append(entry)
 
         if not msg.tool_calls:
+            _log(f"[ORCH row={rid}] model returned no tool_calls — ending orchestrator loop")
             break
 
         for tc in msg.tool_calls:
@@ -277,6 +338,7 @@ def _orchestrate_row(row: dict, deadline_days: Optional[int], use_real: bool) ->
                 args = json.loads(tc.function.arguments or "{}")
             except json.JSONDecodeError:
                 args = {}
+            _log(f"[ORCH row={rid}] executing tool {fname!r} …")
             if fname == "submit_candidates":
                 _msg, acc = _dispatch_tool(fname, args, row, acc, use_real)
                 submitted_summary = args.get("search_summary", "")
@@ -305,8 +367,9 @@ def _orchestrate_row(row: dict, deadline_days: Optional[int], use_real: bool) ->
             else "stopped after max 4 iterations without submit_candidates"
         )
     )
-    print(f"[ORCHESTRATOR] Row {rid} ({name}): strategy = {strategy}")
-    print(f"[ORCHESTRATOR] Row {rid} ({name}): {len(acc)} candidates collected")
+    print(f"[ORCHESTRATOR] Row {rid} ({name}): strategy = {strategy}", flush=True)
+    print(f"[ORCHESTRATOR] Row {rid} ({name}): {len(acc)} candidates collected", flush=True)
+    _log(f"[ORCH row={rid}] orchestrator finished")
 
     return {
         "row": row,
@@ -334,8 +397,15 @@ def orchestrator_agent(
 
     workers = min(len(bom_rows), max(1, _ORCHESTRATOR_MAX_WORKERS))
     print(
-        f"[ORCHESTRATOR] dispatching {len(bom_rows)} rows across {workers} parallel workers"
+        f"[ORCHESTRATOR] dispatching {len(bom_rows)} rows across {workers} parallel workers",
+        flush=True,
     )
+    if use_real and workers > 1:
+        _log(
+            "[ORCHESTRATOR] note: real DigiKey + parallel orchestrators can race on "
+            "OAuth token refresh; digikey-api may open a localhost browser window and "
+            "appear to hang. Set BOMA_ORCHESTRATOR_MAX_WORKERS=1 to run one row at a time."
+        )
 
     results_by_id: dict[int, dict] = {}
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -343,13 +413,17 @@ def orchestrator_agent(
             pool.submit(_orchestrate_row, row, deadline_days, use_real): int(row["id"])
             for row in bom_rows
         }
+        _log("[ORCHESTRATOR] all row tasks submitted; waiting for workers (order may vary)…")
         for fut in as_completed(futures):
             rid = futures[fut]
+            _log(f"[ORCHESTRATOR] worker completing row_id={rid} (fetching result)…")
             try:
                 results_by_id[rid] = fut.result()
+                nc = len(results_by_id[rid].get("candidates") or [])
+                _log(f"[ORCHESTRATOR] row_id={rid} done candidates={nc}")
             except Exception as e:
                 # Don't let one bad row kill the whole sourcing run.
-                print(f"[ORCHESTRATOR] Row {rid}: ERROR — {e}")
+                print(f"[ORCHESTRATOR] Row {rid}: ERROR — {e}", flush=True)
                 # Re-find the row so the specialist still gets to run with no candidates.
                 row = next(r for r in bom_rows if int(r["id"]) == rid)
                 results_by_id[rid] = {
@@ -358,6 +432,7 @@ def orchestrator_agent(
                     "orchestrator_search_summary": f"orchestrator crashed: {e}",
                 }
 
+    _log("[ORCHESTRATOR] all row workers finished; returning ordered results")
     return [results_by_id[int(r["id"])] for r in bom_rows]
 
 
@@ -382,6 +457,7 @@ def specialist_agent(
     no_deadline = deadline_days is None
 
     if not candidates:
+        _log(f"[SPEC row={rid}] specialist skip — 0 candidates")
         merged = dict(row)
         merged.update(
             {
@@ -404,13 +480,19 @@ def specialist_agent(
         )
         deadline_label = "no deadline" if no_deadline else f"{deadline_days}d project window"
         print(
-            f"[SPECIALIST] Row {rid} ({name}): selected (none) @ $0.0 | meets deadline: False | confidence: low"
+            f"[SPECIALIST] Row {rid} ({name}): selected (none) @ $0.0 | meets deadline: False | confidence: low",
+            flush=True,
         )
         print(
-            f"[SPECIALIST] Row {rid} ({name}): deadline assessment: no candidates vs {deadline_label}"
+            f"[SPECIALIST] Row {rid} ({name}): deadline assessment: no candidates vs {deadline_label}",
+            flush=True,
         )
         return merged
 
+    _log(
+        f"[SPEC row={rid}] specialist start candidates={len(candidates)} "
+        f"model={SPECIALIST_MODEL} deadline_days={deadline_days!r}"
+    )
     numbered = [{"index": i, **c} for i, c in enumerate(candidates)]
     deadline_block = (
         f"Project deadline: {deadline_days} days from today.\n"
@@ -433,10 +515,12 @@ def specialist_agent(
 {deadline_block}
 
 Candidates from DigiKey:
-{json.dumps(numbered, indent=2)}
+{json.dumps(numbered, indent=2, default=str)}
 """
 
     client = _clod_client()
+    _log(f"[SPEC row={rid}] CLōD specialist chat.completions …")
+    t_sp = time.perf_counter()
     resp = client.chat.completions.create(
         model=SPECIALIST_MODEL,
         messages=[
@@ -444,6 +528,7 @@ Candidates from DigiKey:
             {"role": "user", "content": user},
         ],
     )
+    _log(f"[SPEC row={rid}] CLōD specialist returned in {time.perf_counter() - t_sp:.2f}s")
     raw = (resp.choices[0].message.content or "").strip()
     try:
         decision = _parse_json_object(raw)
@@ -525,15 +610,18 @@ Candidates from DigiKey:
 
     print(
         f"[SPECIALIST] Row {rid} ({name}): selected {merged.get('matched_mpn')} @ ${merged.get('unit_price')} "
-        f"| meets deadline: {merged.get('meets_deadline')} | confidence: {merged.get('match_confidence')}"
+        f"| meets deadline: {merged.get('meets_deadline')} | confidence: {merged.get('match_confidence')}",
+        flush=True,
     )
     ld = int(lead_weeks * 7)
     tot = ld + 3
     deadline_label = "no deadline" if no_deadline else f"{deadline_days}d project window"
     print(
         f"[SPECIALIST] Row {rid} ({name}): deadline assessment: ~{tot} days to arrival "
-        f"(lead {ld}d + 3d ship) vs {deadline_label}"
+        f"(lead {ld}d + 3d ship) vs {deadline_label}",
+        flush=True,
     )
+    _log(f"[SPEC row={rid}] specialist finished dkpn={merged.get('digikey_part_number')!r}")
     return merged
 
 
