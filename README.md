@@ -6,10 +6,10 @@ BOMA is a procurement agent for hardware teams. Upload the bill-of-materials you
 
 ## How it works
 
-- **Dual-tier model routing through CLōD** — a fast 8B model normalizes every BOM line into a structured spec; a frontier reasoning model ranks live supplier matches. ~**8× cheaper** on tokens, no measurable hit on match quality.
+- **Dual-tier model routing through CLōD**, a fast 8B model normalizes every BOM line into a structured spec; a frontier reasoning model ranks live supplier matches. ~**8× cheaper** on tokens, no measurable hit on match quality.
 - **Live Digi-Key API** for real prices and stock.
-- **Greptile + KiCad** symbols/footprints — grounding fuzzy matches in real, reviewed open-source hardware.
-- **AllScale USDC checkout** — BOMA is the merchant of payment, so suppliers don't have to accept stablecoins.
+- **Greptile + KiCad** symbols/footprints, grounding fuzzy matches in real, reviewed open-source hardware.
+- **AllScale USDC checkout**, BOMA is the merchant of payment, so suppliers don't have to accept stablecoins.
 
 ## Built with
 
