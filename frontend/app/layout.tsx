@@ -51,7 +51,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       lang="en"
       className={`${inter.variable} ${jetbrainsMono.variable} ${instrumentSerif.variable}`}
     >
-      <body>
+      <body className="min-h-screen bg-background text-foreground antialiased">
         <Providers>
           <SmoothScroll>{children}</SmoothScroll>
         </Providers>

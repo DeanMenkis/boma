@@ -3,8 +3,7 @@ Load `.env` so DigiKey, CLōD, AllScale, and other keys are available on `os.env
 
 Search order (first existing file wins; existing shell vars are not overwritten):
 1. `BOM_ENV_FILE` or `DOTENV_PATH` if set
-2. `<repo>/.claude/worktrees/lucid-archimedes-e6fe3f/.env` (team worktree)
-3. `<repo>/.env`
+2. `<repo>/.env`
 
 Set `BOM_SKIP_DOTENV=1` to skip loading.
 """
@@ -22,13 +21,6 @@ def _candidate_env_files() -> list[Path]:
     paths: list[Path] = []
     if explicit:
         paths.append(Path(explicit).expanduser())
-    paths.append(
-        _REPO_ROOT
-        / ".claude"
-        / "worktrees"
-        / "lucid-archimedes-e6fe3f"
-        / ".env"
-    )
     paths.append(_REPO_ROOT / ".env")
     return paths
 

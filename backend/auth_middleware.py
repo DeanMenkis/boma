@@ -17,7 +17,13 @@ def get_current_user(
         def protected_route(user: dict = Depends(get_current_user)):
             return {"uid": user["uid"]}
     """
-    get_firebase_app()
+    try:
+        get_firebase_app()
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
 
     if credentials is None:
         raise HTTPException(

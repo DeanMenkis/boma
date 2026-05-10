@@ -3,13 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Boxes, LogOut } from "lucide-react";
+import { Boxes, Loader2, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 
 export function Header() {
   const pathname = usePathname();
-  const { user, loading, logOut } = useAuth();
+  const { user, loading, logOut, signingOut } = useAuth();
 
   return (
     <header className="sticky top-0 z-50 glass">
@@ -55,6 +55,19 @@ export function Header() {
           >
             Agent
           </Link>
+          {user && (
+            <Link
+              href="/profile"
+              className={cn(
+                "px-3 py-1.5 transition-colors",
+                pathname === "/profile"
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              Profile
+            </Link>
+          )}
         </nav>
 
         <div className="flex items-center gap-2">
@@ -63,18 +76,37 @@ export function Header() {
               <span className="hidden sm:block text-sm text-muted-foreground max-w-[160px] truncate">
                 {user.displayName ?? user.email}
               </span>
-              <Button variant="ghost" size="sm" onClick={() => void logOut()} className="gap-1.5">
-                <LogOut className="h-3.5 w-3.5" />
-                Sign out
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void logOut()}
+                disabled={signingOut}
+                className="gap-1.5 min-w-[7.5rem]"
+              >
+                {signingOut ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                    Signing out…
+                  </>
+                ) : (
+                  <>
+                    <LogOut className="h-3.5 w-3.5" aria-hidden />
+                    Sign out
+                  </>
+                )}
               </Button>
             </>
           ) : (
             <>
               <Link href="/login">
-                <Button variant="ghost" size="sm">Log in</Button>
+                <Button variant="ghost" size="sm">
+                  Log in
+                </Button>
               </Link>
               <Link href="/signup">
-                <Button variant="hero" size="sm">Get started</Button>
+                <Button variant="hero" size="sm">
+                  Get started
+                </Button>
               </Link>
             </>
           )}

@@ -1,6 +1,14 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  startTransition,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
@@ -21,6 +29,8 @@ import { getFirebaseAuth, getGoogleProvider } from "@/lib/firebase";
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
+  /** True while sign-out is in progress (show loading UI). */
+  signingOut: boolean;
   /** Sign in with email and password. */
   signIn: (email: string, password: string) => Promise<void>;
   /** Create a new account with email, password and optional display name. */
@@ -39,9 +49,13 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+/** Minimum time sign-out UI is shown so the transition never feels instant. */
+const SIGN_OUT_MIN_MS = 520;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [signingOut, setSigningOut] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -55,7 +69,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(
     async (email: string, password: string) => {
       await signInWithEmailAndPassword(getFirebaseAuth(), email, password);
-      router.push("/app");
+      startTransition(() => {
+        router.replace("/app");
+      });
     },
     [router],
   );
@@ -70,19 +86,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (name) {
         await updateProfile(newUser, { displayName: name });
       }
-      router.push("/app");
+      startTransition(() => {
+        router.replace("/app");
+      });
     },
     [router],
   );
 
   const signInWithGoogle = useCallback(async () => {
     await signInWithPopup(getFirebaseAuth(), getGoogleProvider());
-    router.push("/app");
+    startTransition(() => {
+      router.replace("/app");
+    });
   }, [router]);
 
   const logOut = useCallback(async () => {
-    await signOut(getFirebaseAuth());
-    router.push("/");
+    setSigningOut(true);
+    const started = performance.now();
+    try {
+      await signOut(getFirebaseAuth());
+      const elapsed = performance.now() - started;
+      if (elapsed < SIGN_OUT_MIN_MS) {
+        await new Promise((r) => setTimeout(r, SIGN_OUT_MIN_MS - elapsed));
+      }
+      startTransition(() => {
+        router.replace("/");
+      });
+    } finally {
+      setSigningOut(false);
+    }
   }, [router]);
 
   const getIdToken = useCallback(async (): Promise<string | null> => {
@@ -93,7 +125,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, signIn, signUp, signInWithGoogle, logOut, getIdToken }}
+      value={{
+        user,
+        loading,
+        signingOut,
+        signIn,
+        signUp,
+        signInWithGoogle,
+        logOut,
+        getIdToken,
+      }}
     >
       {children}
     </AuthContext.Provider>

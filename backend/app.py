@@ -9,9 +9,6 @@ from firebase_init import get_firebase_app
 
 load_dotenv()
 
-# Eagerly initialise Firebase Admin on startup.
-get_firebase_app()
-
 app = FastAPI(title="BOMA Backend")
 
 # ---------------------------------------------------------------------------

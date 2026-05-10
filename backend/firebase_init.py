@@ -16,6 +16,13 @@ def get_firebase_app() -> firebase_admin.App:
         os.path.join(os.path.dirname(__file__), "service-account.json"),
     )
 
+    if not os.path.isfile(service_account_path):
+        raise FileNotFoundError(
+            "Firebase Admin SDK service account JSON not found at "
+            f"{service_account_path}. Download it from Firebase Console → "
+            "Project settings → Service accounts, or set FIREBASE_SERVICE_ACCOUNT_PATH."
+        )
+
     cred = credentials.Certificate(service_account_path)
     app = firebase_admin.initialize_app(cred)
     _initialized = True

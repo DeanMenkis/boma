@@ -18,13 +18,16 @@ export function AuthCard({ mode }: Props) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
+  /** Single-flight auth UI: email form vs Google flow. */
+  const [pending, setPending] = useState<"idle" | "email" | "google">("idle");
   const [error, setError] = useState<string | null>(null);
+
+  const busy = pending !== "idle";
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
-    setLoading(true);
+    setPending("email");
     try {
       if (isSignup) {
         await signUp(email, password, name || undefined);
@@ -34,19 +37,19 @@ export function AuthCard({ mode }: Props) {
     } catch (err) {
       setError(formatFirebaseError(err));
     } finally {
-      setLoading(false);
+      setPending("idle");
     }
   };
 
   const onGoogle = async () => {
     setError(null);
-    setLoading(true);
+    setPending("google");
     try {
       await signInWithGoogle();
     } catch (err) {
       setError(formatFirebaseError(err));
     } finally {
-      setLoading(false);
+      setPending("idle");
     }
   };
 
@@ -103,8 +106,14 @@ export function AuthCard({ mode }: Props) {
             </p>
           )}
 
-          <Button type="submit" variant="hero" size="lg" className="w-full mt-2" disabled={loading}>
-            {loading ? "…" : isSignup ? "Create account" : "Log in"}
+          <Button type="submit" variant="hero" size="lg" className="w-full mt-2" disabled={busy}>
+            {pending === "email"
+              ? isSignup
+                ? "Creating account…"
+                : "Signing in…"
+              : isSignup
+                ? "Create account"
+                : "Log in"}
           </Button>
         </form>
 
@@ -117,10 +126,10 @@ export function AuthCard({ mode }: Props) {
           size="lg"
           className="w-full"
           type="button"
-          disabled={loading}
+          disabled={busy}
           onClick={() => void onGoogle()}
         >
-          <GoogleIcon /> Continue with Google
+          <GoogleIcon /> {pending === "google" ? "Opening Google…" : "Continue with Google"}
         </Button>
 
         <p className="mt-6 text-center text-xs text-muted-foreground">
@@ -188,8 +197,17 @@ function formatFirebaseError(err: unknown): string {
       "auth/popup-closed-by-user": "Sign-in popup was closed.",
       "auth/cancelled-popup-request": "Only one popup at a time.",
       "auth/network-request-failed": "Network error. Check your connection.",
+      "auth/internal-error":
+        "Firebase returned an internal error. Confirm NEXT_PUBLIC_FIREBASE_* values in .env.local match your Firebase project and restart the dev server.",
+      "auth/operation-not-allowed":
+        "This sign-in method is disabled in Firebase Console → Authentication → Sign-in method.",
+      "auth/invalid-api-key":
+        "Invalid Firebase API key. Check NEXT_PUBLIC_FIREBASE_API_KEY in .env.local.",
     };
     return messages[code] ?? `Authentication error (${code})`;
+  }
+  if (err instanceof Error && err.message.includes("Missing Firebase")) {
+    return err.message;
   }
   return "Something went wrong. Please try again.";
 }

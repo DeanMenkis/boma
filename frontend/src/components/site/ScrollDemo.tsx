@@ -12,6 +12,7 @@ import {
   type MotionValue,
 } from "motion/react";
 import {
+  Activity,
   ArrowRight,
   Check,
   CircuitBoard,
@@ -19,42 +20,26 @@ import {
   Sparkles,
   Truck,
   Upload,
-  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-
-type BomRow = {
-  part: string;
-  desc: string;
-  qty: number;
-  unit: number;
-};
-
-const BOM: BomRow[] = [
-  { part: "ATMEGA328P-PU", desc: "MCU 8-bit AVR 32KB", qty: 5, unit: 2.21 },
-  { part: "LM7805CT", desc: "LDO 5V 1A TO-220", qty: 10, unit: 0.58 },
-  { part: "RC0805FR-074K7L", desc: "Resistor 4.7k 1% 0805", qty: 100, unit: 0.42 },
-  { part: "CL21B104KBCNNNC", desc: "Cap 100nF 50V X7R 0805", qty: 50, unit: 0.04 },
-  { part: "SK6812-3535", desc: "Addressable RGB LED", qty: 25, unit: 0.36 },
-];
+import {
+  MARKETING_BOM as BOM,
+  MARKETING_BOM_LINE_COUNT,
+  MARKETING_BOM_SUBTOTAL,
+  MARKETING_BOM_UNIT_COUNT,
+  formatMarketingCurrency,
+  type MarketingBomRow,
+} from "@/lib/marketing-bom";
 
 const HERO_INDEX = 2;
 const HERO_ROW = BOM[HERO_INDEX];
-const CART_TOTAL = 1204.62;
 
 const STEPS = [
   { label: "Upload", icon: Upload, range: [0.0, 0.18] as const },
   { label: "Match", icon: Sparkles, range: [0.32, 0.7] as const },
   { label: "Cart", icon: ShoppingCart, range: [0.78, 1.0] as const },
 ];
-
-const fmtCurrency = (v: number) =>
-  v.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-  });
 
 export function ScrollDemo() {
   const reduce = useReducedMotion();
@@ -112,10 +97,10 @@ function ScrollDemoAnimated() {
   const dockedY = useTransform(progress, [0.86, 0.94], [16, 0]);
 
   // Total tally
-  const totalNumber = useTransform(progress, [0.85, 1], [0, CART_TOTAL]);
-  const [totalText, setTotalText] = useState(fmtCurrency(0));
+  const totalNumber = useTransform(progress, [0.85, 1], [0, MARKETING_BOM_SUBTOTAL]);
+  const [totalText, setTotalText] = useState(formatMarketingCurrency(0));
   useMotionValueEvent(totalNumber, "change", (v) => {
-    setTotalText(fmtCurrency(v));
+    setTotalText(formatMarketingCurrency(v));
   });
 
   // Checkout CTA
@@ -321,9 +306,12 @@ function SpreadsheetCard({
       </div>
 
       <div className="flex items-center justify-between border-t border-border bg-surface px-4 py-2 font-mono text-[10px] text-muted-foreground">
-        <span>5 rows · 2 columns selected</span>
+        <span>
+          {MARKETING_BOM_LINE_COUNT} line items · {MARKETING_BOM_UNIT_COUNT.toLocaleString()} units
+        </span>
         <span className="flex items-center gap-1">
-          <Zap className="h-3 w-3 text-primary" /> BOMA listening
+          <Activity className="h-3 w-3 text-primary" />
+          Live distributor pricing
         </span>
       </div>
     </div>
@@ -337,7 +325,7 @@ function FloatingRow({
   priceOpacity,
   priceY,
 }: {
-  row: BomRow;
+  row: MarketingBomRow;
   chipsOpacity: MotionValue<number>;
   chipsY: MotionValue<number>;
   priceOpacity: MotionValue<number>;
@@ -391,6 +379,52 @@ function FloatingRow({
   );
 }
 
+function CartLineRows({
+  dockedOpacity,
+  dockedY,
+}: {
+  dockedOpacity: MotionValue<number>;
+  dockedY: MotionValue<number>;
+}) {
+  const heroPresence = useTransform(dockedOpacity, [0, 1], [0.35, 1]);
+
+  return (
+    <>
+      {BOM.map((row, i) => {
+        const isHero = i === HERO_INDEX;
+        if (!isHero) {
+          return (
+            <div
+              key={row.part}
+              className="flex items-center justify-between rounded-md border border-border bg-surface px-3 py-2 font-mono text-[11px]"
+            >
+              <div className="truncate text-muted-foreground">{row.part}</div>
+              <div className="text-muted-foreground">
+                {row.qty} × ${row.unit.toFixed(2)}
+              </div>
+            </div>
+          );
+        }
+        return (
+          <motion.div
+            key={row.part}
+            style={{ opacity: heroPresence, y: dockedY }}
+            className="flex items-center justify-between rounded-md border border-primary/40 bg-primary/10 px-3 py-2 font-mono text-[11px]"
+          >
+            <div className="flex items-center gap-2 truncate text-foreground">
+              <Check className="h-3 w-3 text-primary" />
+              {row.part}
+            </div>
+            <div className="text-foreground">
+              {row.qty} × ${row.unit.toFixed(2)}
+            </div>
+          </motion.div>
+        );
+      })}
+    </>
+  );
+}
+
 function CartCard({
   dockedOpacity,
   dockedY,
@@ -433,37 +467,13 @@ function CartCard({
           </div>
         </div>
         <div className="rounded-md border border-border bg-surface px-2 py-1 font-mono text-[10px] text-muted-foreground">
-          5 lines
+          {MARKETING_BOM_LINE_COUNT} lines
         </div>
       </div>
 
-      {/* Static cart lines (subtle) */}
+      {/* Cart lines — same order as the BOM */}
       <div className="mt-4 space-y-2">
-        {BOM.filter((_, i) => i !== HERO_INDEX).map((row) => (
-          <div
-            key={row.part}
-            className="flex items-center justify-between rounded-md border border-border bg-surface px-3 py-2 font-mono text-[11px]"
-          >
-            <div className="truncate text-muted-foreground">{row.part}</div>
-            <div className="text-muted-foreground">
-              {row.qty} × ${row.unit.toFixed(2)}
-            </div>
-          </div>
-        ))}
-
-        {/* Hero line — slides in at the end */}
-        <motion.div
-          style={{ opacity: dockedOpacity, y: dockedY }}
-          className="flex items-center justify-between rounded-md border border-primary/40 bg-primary/10 px-3 py-2 font-mono text-[11px]"
-        >
-          <div className="flex items-center gap-2 truncate text-foreground">
-            <Check className="h-3 w-3 text-primary" />
-            {HERO_ROW.part}
-          </div>
-          <div className="text-foreground">
-            {HERO_ROW.qty} × ${HERO_ROW.unit.toFixed(2)}
-          </div>
-        </motion.div>
+        <CartLineRows dockedOpacity={dockedOpacity} dockedY={dockedY} />
       </div>
 
       {/* Footer summary */}
@@ -475,7 +485,7 @@ function CartCard({
           </span>
           <span className="flex items-center gap-2 text-muted-foreground">
             <CircuitBoard className="h-3 w-3" />
-            142 parts
+            {MARKETING_BOM_UNIT_COUNT.toLocaleString()} units
           </span>
         </div>
 

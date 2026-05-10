@@ -1,8 +1,14 @@
 import Link from "next/link";
 import { Header } from "@/components/site/Header";
 import { Footer } from "@/components/site/Footer";
-import { ScrollDemo } from "@/components/site/ScrollDemo";
+import { HomeScrollDemo } from "@/components/site/HomeScrollDemo";
 import { Button } from "@/components/ui/button";
+import {
+  formatMarketingCurrency,
+  MARKETING_BOM_LINE_COUNT,
+  MARKETING_BOM_UNIT_COUNT,
+  MARKETING_BOM_SUBTOTAL,
+} from "@/lib/marketing-bom";
 import { ArrowRight, ShoppingCart, CircuitBoard, Cpu, Clock, Check } from "lucide-react";
 
 export function HomePage() {
@@ -46,7 +52,7 @@ export function HomePage() {
         </div>
       </section>
 
-      <ScrollDemo />
+      <HomeScrollDemo />
 
       {/* Built for */}
       <section className="mx-auto max-w-7xl px-6 py-24 border-t border-border">
@@ -79,10 +85,14 @@ export function HomePage() {
           <div className="relative rounded-2xl border border-border bg-card p-6 shadow-card">
             <div className="grid grid-cols-2 gap-4">
               {[
-                { i: CircuitBoard, t: "Parts", v: "142 found" },
+                {
+                  i: CircuitBoard,
+                  t: "BOM",
+                  v: `${MARKETING_BOM_LINE_COUNT} lines · ${MARKETING_BOM_UNIT_COUNT.toLocaleString()} units`,
+                },
                 { i: Cpu, t: "Sources", v: "DigiKey + Mouser" },
                 { i: Clock, t: "Ships", v: "In 3 days" },
-                { i: ShoppingCart, t: "Cart", v: "$1,204" },
+                { i: ShoppingCart, t: "Cart", v: formatMarketingCurrency(MARKETING_BOM_SUBTOTAL) },
               ].map(({ i: Icon, t, v }) => (
                 <div key={t} className="rounded-lg border border-border bg-surface p-4">
                   <Icon className="h-5 w-5 text-primary" />

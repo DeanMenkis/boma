@@ -129,11 +129,18 @@
     background-image: var(--gradient-hero);
   }
 
+  /* Solid fallback when gradient clipping isn't applied (avoids invisible headlines). */
   .text-gradient {
-    background: var(--gradient-text);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
+    color: var(--foreground);
+  }
+
+  @supports ((-webkit-background-clip: text) or (background-clip: text)) {
+    .text-gradient {
+      background: var(--gradient-text);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
   }
 
   .shadow-glow {

@@ -1,30 +1,27 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import {
+  Bookmark,
+  ExternalLink,
+  FileSpreadsheet,
+  Loader2,
+  ShoppingCart,
+  Sparkles,
+  Upload,
+} from "lucide-react";
+
 import { Header } from "@/components/site/Header";
 import { Footer } from "@/components/site/Footer";
 import { Button } from "@/components/ui/button";
-import { useRef, useState } from "react";
-import {
-  Upload,
-  FileSpreadsheet,
-  Sparkles,
-  ShoppingCart,
-  ExternalLink,
-  Loader2,
-} from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { useSavedBoms } from "@/hooks/useSavedBoms";
+import type { BomCartRow, SavedBom } from "@/lib/bom-types";
+import { getSavedBom } from "@/lib/saved-boms-storage";
 
-type Row = {
-  part: string;
-  desc: string;
-  qty: number;
-  distributor: "DigiKey" | "Mouser";
-  unit: number;
-  stock: number;
-  eta: string;
-  url: string;
-};
-
-const MOCK_ROWS: Row[] = [
+const MOCK_ROWS: BomCartRow[] = [
   {
     part: "STM32H743VIT6",
     desc: "Microcontroller chip",
@@ -88,16 +85,27 @@ const MOCK_ROWS: Row[] = [
 ];
 
 export function BomAgentPage() {
+  const { user } = useAuth();
+  const { saveSavedBom } = useSavedBoms(user?.uid ?? null);
+
   const [file, setFile] = useState<File | null>(null);
+  const [sourceLabel, setSourceLabel] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
-  const [rows, setRows] = useState<Row[] | null>(null);
+  const [rows, setRows] = useState<BomCartRow[] | null>(null);
   const [drag, setDrag] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const onSavedBomLoaded = useCallback((bom: SavedBom) => {
+    setRows(bom.rows);
+    setSourceLabel(bom.title);
+    setFile(null);
+  }, []);
 
   const onFile = (f: File | undefined | null) => {
     if (!f) return;
     setFile(f);
     setRows(null);
+    setSourceLabel(null);
   };
 
   const runAgent = async () => {
@@ -111,8 +119,31 @@ export function BomAgentPage() {
 
   const subtotal = rows?.reduce((s, r) => s + r.qty * r.unit, 0) ?? 0;
 
+  const saveToProfile = () => {
+    if (!rows || !user?.uid) return;
+    const baseName =
+      file?.name?.replace(/\.[^.]+$/, "") ??
+      sourceLabel ??
+      `Cart · ${new Date().toLocaleDateString()}`;
+    saveSavedBom({
+      id: crypto.randomUUID(),
+      title: baseName,
+      sourceFileName: file?.name ?? null,
+      savedAt: new Date().toISOString(),
+      lineCount: rows.length,
+      subtotal,
+      rows,
+    });
+  };
+
+  const uploadCaption = file?.name ?? sourceLabel;
+
   return (
     <div className="min-h-screen flex flex-col">
+      <Suspense fallback={null}>
+        <LoadSavedBomBridge onLoaded={onSavedBomLoaded} />
+      </Suspense>
+
       <Header />
 
       <section className="mx-auto w-full max-w-6xl px-6 pt-12 pb-6">
@@ -147,8 +178,8 @@ export function BomAgentPage() {
               <Upload className="h-6 w-6" />
             </div>
             <p className="mt-4 text-sm">
-              {file ? (
-                <span className="font-mono">{file.name}</span>
+              {uploadCaption ? (
+                <span className="font-mono">{uploadCaption}</span>
               ) : (
                 <>Drag and drop your parts list here, or</>
               )}
@@ -190,16 +221,28 @@ export function BomAgentPage() {
 
           {rows && (
             <div className="rounded-2xl border border-border bg-card shadow-card overflow-hidden">
-              <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+              <div className="px-6 py-4 border-b border-border flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-semibold">Cart</h2>
                   <p className="text-xs text-muted-foreground font-mono">
                     {rows.length} items · ships by Tue, May 13
                   </p>
                 </div>
-                <Button variant="hero" size="sm">
-                  <ShoppingCart className="h-4 w-4" /> Export cart
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {user ? (
+                    <Button variant="glass" size="sm" onClick={saveToProfile} className="gap-1.5">
+                      <Bookmark className="h-4 w-4" />
+                      Save to profile
+                    </Button>
+                  ) : (
+                    <Button variant="glass" size="sm" asChild>
+                      <Link href="/login">Sign in to save</Link>
+                    </Button>
+                  )}
+                  <Button variant="hero" size="sm">
+                    <ShoppingCart className="h-4 w-4" /> Export cart
+                  </Button>
+                </div>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -296,4 +339,24 @@ export function BomAgentPage() {
       <Footer />
     </div>
   );
+}
+
+function LoadSavedBomBridge({ onLoaded }: { onLoaded: (bom: SavedBom) => void }) {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const { user } = useAuth();
+  const loadId = searchParams.get("load");
+
+  useEffect(() => {
+    if (!user?.uid || !loadId) return;
+    const bom = getSavedBom(user.uid, loadId);
+    if (!bom) {
+      router.replace("/app");
+      return;
+    }
+    onLoaded(bom);
+    router.replace("/app");
+  }, [user?.uid, loadId, onLoaded, router]);
+
+  return null;
 }
