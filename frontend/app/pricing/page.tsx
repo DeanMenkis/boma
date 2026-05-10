@@ -3,11 +3,12 @@ import { PricingPage } from "@/screens/pricing-page";
 
 export const metadata: Metadata = {
   title: "Pricing",
-  description: "Simple, usage-based pricing for teams sourcing parts. Free to start.",
+  description:
+    "BOMA pricing: $1 base plus $0.10 per BOM line. Pay in USDC via AllScale at checkout.",
   openGraph: {
     title: "Pricing — BOMA",
     description:
-      "Free to start. Pro and Team plans for hardware shops sourcing parts on DigiKey, Mouser, and more.",
+      "$1 + $0.10 per CSV line. Stablecoin checkout with AllScale; live pricing on DigiKey and Mouser.",
   },
 };
 

@@ -1,50 +1,17 @@
 import Link from "next/link";
 import { Header } from "@/components/site/Header";
 import { Footer } from "@/components/site/Footer";
+import { PricingFeeEstimator } from "@/components/site/PricingFeeEstimator";
 import { Button } from "@/components/ui/button";
 import { Check } from "lucide-react";
+import { BOMA_BASE_FEE_USD, BOMA_PER_LINE_USD } from "@/lib/pricing";
 
-const plans = [
-  {
-    name: "Hobby",
-    price: "$0",
-    period: "/forever",
-    blurb: "For tinkerers and weekend builds.",
-    cta: "Start free",
-    href: "/signup",
-    features: ["3 lists / month", "Up to 50 parts per list", "DigiKey + Mouser", "Export to CSV"],
-  },
-  {
-    name: "Pro",
-    price: "$29",
-    period: "/month",
-    blurb: "For people shipping real hardware.",
-    cta: "Go Pro",
-    href: "/signup",
-    featured: true,
-    features: [
-      "Unlimited lists",
-      "Up to 1,000 parts per list",
-      "Priority queue",
-      "Saved projects and history",
-      "One-click cart hand-off",
-    ],
-  },
-  {
-    name: "Team",
-    price: "Custom",
-    period: "",
-    blurb: "For hardware companies and labs.",
-    cta: "Contact sales",
-    href: "/signup",
-    features: [
-      "Single sign-on (SSO) and roles",
-      "Approval workflows",
-      "Custom suppliers",
-      "API access",
-      "Dedicated support",
-    ],
-  },
+const ALLSCALE_DOCS = "https://docs.allscale.io";
+
+const features = [
+  "Live distributor pricing and stock on every line",
+  "DigiKey and Mouser in one flow. Export CSV or open a prefilled cart.",
+  "Checkout in USDC via AllScale",
 ];
 
 export function PricingPage() {
@@ -57,49 +24,63 @@ export function PricingPage() {
         <div className="relative mx-auto max-w-3xl px-6 pt-20 pb-12 text-center">
           <p className="font-mono text-xs text-primary uppercase tracking-widest">Pricing</p>
           <h1 className="mt-3 font-display text-5xl md:text-6xl text-gradient">
-            Pay for what you build.
+            One simple fee per BOM.
           </h1>
           <p className="mt-5 text-muted-foreground">
-            Free to try on small lists. Upgrade when you need more.
+            Pay BOMA in USDC through{" "}
+            <a
+              href={ALLSCALE_DOCS}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary underline underline-offset-4 hover:text-primary/90"
+            >
+              AllScale
+            </a>
+            .
           </p>
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-6 pb-24 grid md:grid-cols-3 gap-6">
-        {plans.map((p) => (
-          <div
-            key={p.name}
-            className={`relative rounded-2xl border p-8 shadow-card flex flex-col ${
-              p.featured ? "border-primary/40 bg-card shadow-glow" : "border-border bg-card"
-            }`}
-          >
-            {p.featured && (
-              <span className="absolute -top-3 left-8 px-2 py-0.5 rounded-full bg-primary text-primary-foreground text-[10px] font-mono uppercase tracking-wider">
-                Most popular
-              </span>
-            )}
-            <h3 className="font-mono text-sm text-muted-foreground">{p.name}</h3>
-            <div className="mt-3 flex items-baseline gap-1">
-              <span className="font-display text-5xl">{p.price}</span>
-              <span className="text-muted-foreground text-sm">{p.period}</span>
-            </div>
-            <p className="mt-3 text-sm text-muted-foreground">{p.blurb}</p>
+      <section className="mx-auto max-w-7xl px-6 pb-24">
+        <div className="mx-auto grid max-w-4xl gap-10 lg:grid-cols-2 lg:items-start">
+          <PricingFeeEstimator />
 
-            <ul className="mt-6 space-y-2.5 text-sm flex-1">
-              {p.features.map((f) => (
+          <div className="relative rounded-2xl border border-primary/40 bg-card p-8 shadow-card shadow-glow flex flex-col">
+            <span className="inline-flex w-fit rounded-full bg-primary/15 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-primary">
+              AllScale checkout
+            </span>
+            <h2 className="mt-4 font-display text-3xl text-gradient">Usage-based</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Priced from your uploaded CSV. Each BOM row counts as one line.
+            </p>
+
+            <div className="mt-8 flex items-baseline gap-2 flex-wrap">
+              <span className="font-display text-5xl tabular-nums">
+                ${BOMA_BASE_FEE_USD.toFixed(0)}
+              </span>
+              <span className="text-muted-foreground text-sm">base</span>
+              <span className="text-muted-foreground/80">+</span>
+              <span className="font-display text-5xl tabular-nums">
+                ${BOMA_PER_LINE_USD.toFixed(2)}
+              </span>
+              <span className="text-muted-foreground text-sm">/ line</span>
+            </div>
+
+            <ul className="mt-8 space-y-2.5 text-sm flex-1">
+              {features.map((f) => (
                 <li key={f} className="flex items-start gap-2">
                   <Check className="h-4 w-4 mt-0.5 text-primary shrink-0" /> {f}
                 </li>
               ))}
             </ul>
 
-            <Link href={p.href} className="mt-8 block">
-              <Button variant={p.featured ? "hero" : "glass"} size="lg" className="w-full">
-                {p.cta}
+            <Link href="/app" className="mt-10 block">
+              <Button variant="hero" size="lg" className="w-full">
+                Upload a BOM
               </Button>
             </Link>
           </div>
-        ))}
+        </div>
       </section>
 
       <Footer />
