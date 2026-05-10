@@ -1,0 +1,11 @@
+# PyPI digikey-api 1.1.0 targets legacy Search v3; Product Information v4 needs this fork:
+digikey-api @ git+https://github.com/hurricaneJoef/digikey-api.git
+# certauth (DigiKey OAuth localhost TLS) calls PyOpenSSL X509.add_extensions — removed in pyOpenSSL 24+
+pyopenssl>=23.2.0,<24
+six>=1.16.0
+python-dotenv>=1.0.0
+openai>=1.40.0
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.9
+rich>=13.7.0

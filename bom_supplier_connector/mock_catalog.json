@@ -1,0 +1,156 @@
+[
+  {
+    "mpn": "GRM21BR71H103KA01L",
+    "description": "10nF 50V X7R 0805 MLCC",
+    "unit_price": 0.08,
+    "stock": 50000,
+    "lead_time_weeks": 20,
+    "digikey_part_number": "MOCK-10NF-0805-ND",
+    "product_url": "https://www.digikey.com/mock/10nf",
+    "manufacturer": "Murata",
+    "keywords": ["10nF", "C0805", "0805", "MLCC", "X7R", "capacitor", "10 nF"]
+  },
+  {
+    "mpn": "GRM21BR61C106KE15L",
+    "description": "10uF 16V X5R 0805 MLCC",
+    "unit_price": 0.15,
+    "stock": 12000,
+    "lead_time_weeks": 12,
+    "digikey_part_number": "MOCK-10UF-0805-ND",
+    "product_url": "https://www.digikey.com/mock/10uf",
+    "manufacturer": "Murata",
+    "keywords": ["10uF", "C0805", "0805", "MLCC", "10 µF", "10u"]
+  },
+  {
+    "mpn": "GRM21BR71C104KA01L",
+    "description": "100nF 16V X7R 0805 MLCC",
+    "unit_price": 0.05,
+    "stock": 80000,
+    "lead_time_weeks": 8,
+    "digikey_part_number": "MOCK-100NF-0805-ND",
+    "product_url": "https://www.digikey.com/mock/100nf",
+    "manufacturer": "Murata",
+    "keywords": ["100nF", "C0805", "0805", "MLCC", "0.1uF"]
+  },
+  {
+    "mpn": "GRM21BR61A226ME15L",
+    "description": "22uF 10V X5R 0805 MLCC",
+    "unit_price": 0.22,
+    "stock": 6000,
+    "lead_time_weeks": 10,
+    "digikey_part_number": "MOCK-22UF-0805-ND",
+    "product_url": "https://www.digikey.com/mock/22uf",
+    "manufacturer": "Murata",
+    "keywords": ["22uF", "C0805", "0805", "22 µF"]
+  },
+  {
+    "mpn": "GRM21BR71H272KA01L",
+    "description": "2.7nF 50V X7R 0805 MLCC",
+    "unit_price": 0.06,
+    "stock": 30000,
+    "lead_time_weeks": 14,
+    "digikey_part_number": "MOCK-2N7-0805-ND",
+    "product_url": "https://www.digikey.com/mock/2n7",
+    "manufacturer": "Murata",
+    "keywords": ["2.7nF", "C0805", "0805", "2.7 nF"]
+  },
+  {
+    "mpn": "UPW1H101MPD",
+    "description": "100uF 50V Aluminum Electrolytic Radial",
+    "unit_price": 0.45,
+    "stock": 4000,
+    "lead_time_weeks": 6,
+    "digikey_part_number": "MOCK-UPW1H101MPD-ND",
+    "product_url": "https://www.digikey.com/mock/upw1h101",
+    "manufacturer": "Nichicon",
+    "keywords": ["UPW1H101MPD", "100uF", "electrolytic", "radial"]
+  },
+  {
+    "mpn": "7447797360",
+    "description": "3.6µH Shielded Inductor 1210",
+    "unit_price": 0.65,
+    "stock": 2500,
+    "lead_time_weeks": 9,
+    "digikey_part_number": "MOCK-7447797360-ND",
+    "product_url": "https://www.digikey.com/mock/inductor",
+    "manufacturer": "Würth Elektronik",
+    "keywords": ["7447797360", "3.6uH", "inductor", "WE-KI"]
+  },
+  {
+    "mpn": "RC0805FR-07115KL",
+    "description": "115kΩ 1% 0805 Thick Film Resistor",
+    "unit_price": 0.01,
+    "stock": 100000,
+    "lead_time_weeks": 4,
+    "digikey_part_number": "MOCK-115K-0805-ND",
+    "product_url": "https://www.digikey.com/mock/115k",
+    "manufacturer": "Yageo",
+    "keywords": ["115k", "115kΩ", "R0805", "0805", "resistor"]
+  },
+  {
+    "mpn": "RC0805FR-0722K1L",
+    "description": "22.1kΩ 1% 0805 Thick Film Resistor",
+    "unit_price": 0.01,
+    "stock": 95000,
+    "lead_time_weeks": 4,
+    "digikey_part_number": "MOCK-22K1-0805-ND",
+    "product_url": "https://www.digikey.com/mock/22k1",
+    "manufacturer": "Yageo",
+    "keywords": ["22.1k", "22.1kΩ", "R0805", "0805", "resistor"]
+  },
+  {
+    "mpn": "RC0805FR-0715K8L",
+    "description": "15.8kΩ 1% 0805 Thick Film Resistor",
+    "unit_price": 0.01,
+    "stock": 88000,
+    "lead_time_weeks": 4,
+    "digikey_part_number": "MOCK-15K8-0805-ND",
+    "product_url": "https://www.digikey.com/mock/15k8",
+    "manufacturer": "Yageo",
+    "keywords": ["15.8k", "15.8kΩ", "R0805", "0805", "resistor"]
+  },
+  {
+    "mpn": "61300311121",
+    "description": "3-Pin 2.54mm Female Header",
+    "unit_price": 0.12,
+    "stock": 20000,
+    "lead_time_weeks": 3,
+    "digikey_part_number": "MOCK-HDR3-254-ND",
+    "product_url": "https://www.digikey.com/mock/hdr3",
+    "manufacturer": "Würth Elektronik",
+    "keywords": ["HDR-F-2.54", "3-pin", "header", "2.54"]
+  },
+  {
+    "mpn": "61300511121",
+    "description": "5-Pin 2.54mm Female Header",
+    "unit_price": 0.18,
+    "stock": 15000,
+    "lead_time_weeks": 3,
+    "digikey_part_number": "MOCK-HDR5-254-ND",
+    "product_url": "https://www.digikey.com/mock/hdr5",
+    "manufacturer": "Würth Elektronik",
+    "keywords": ["HDR-F-2.54", "5-pin", "header", "2.54"]
+  },
+  {
+    "mpn": "TMC2209-LA-T",
+    "description": "Step/Dir Stepper Motor Driver IC TMC2209",
+    "unit_price": 4.85,
+    "stock": 500,
+    "lead_time_weeks": 2,
+    "digikey_part_number": "MOCK-TMC2209-LA-ND",
+    "product_url": "https://www.digikey.com/mock/tmc2209",
+    "manufacturer": "TRINAMIC",
+    "keywords": ["TMC2209", "stepper", "driver", "Trinamic"]
+  },
+  {
+    "mpn": "AP64501SP-13",
+    "description": "4.5-40V Input 1.5A Buck Converter SOP-8EP",
+    "unit_price": 1.25,
+    "stock": 800,
+    "lead_time_weeks": 18,
+    "digikey_part_number": "MOCK-AP64501SP-ND",
+    "product_url": "https://www.digikey.com/mock/ap64501",
+    "manufacturer": "Diodes Inc.",
+    "keywords": ["AP64501SP-13", "AP64501", "buck", "C2071517", "LCSC"]
+  }
+]
