@@ -112,6 +112,22 @@ def _print_summary(console: Console, result: dict) -> None:
     console.print(json.dumps(s, indent=2))
 
 
+def _print_digikey_mylist(console: Console, result: dict) -> None:
+    url = result.get("list_url") or ""
+    err = result.get("digikey_list_error")
+    parts = result.get("parts") or []
+    n_dk = sum(1 for p in parts if p.get("digikey_part_number"))
+    if url:
+        console.print("\n[bold green]DigiKey MyList (one-time link)[/bold green]")
+        console.print(url)
+    elif err:
+        console.print(f"\n[bold yellow]DigiKey MyList[/bold yellow] could not be created: {err}")
+    elif n_dk == 0:
+        console.print(
+            "\n[dim]No DigiKey part numbers on matched lines — MyList not created.[/dim]"
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Enrich a BOM via DigiKey + CLōD agents.")
     parser.add_argument("csv_filepath", nargs="?", help="Path to BOM CSV")
@@ -121,17 +137,32 @@ def main() -> None:
         default=None,
         help="Project deadline in days. Omit to ignore deadline and pick cheapest.",
     )
+    parser.add_argument(
+        "--list-name",
+        default=None,
+        metavar="NAME",
+        help="DigiKey MyList title suffix after 'BOMA —' (default: CSV filename stem, "
+        "or 'built-in test' for the built-in sample).",
+    )
     args = parser.parse_args()
     console = Console()
 
     try:
         if args.csv_filepath:
-            result = enrich_bom(args.csv_filepath, args.deadline)
+            result = enrich_bom(
+                args.csv_filepath,
+                args.deadline,
+                digikey_list_name=args.list_name,
+            )
         else:
             console.print(
                 "[dim]No CSV provided — running built-in test (3 rows, no deadline).[/dim]\n"
             )
-            result = enrich_bom_rows(_builtin_rows(), args.deadline)
+            result = enrich_bom_rows(
+                _builtin_rows(),
+                args.deadline,
+                digikey_list_name=args.list_name or "built-in test",
+            )
     except RuntimeError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise SystemExit(1) from e
@@ -139,10 +170,7 @@ def main() -> None:
     _print_table(console, result)
     _print_warnings(console, result)
     _print_summary(console, result)
-    console.print(
-        "\n[dim]DigiKey third-party MyLists (single-use URL) are created from the "
-        "FastAPI POST /enrich flow when rows include DigiKey part numbers.[/dim]"
-    )
+    _print_digikey_mylist(console, result)
 
 
 if __name__ == "__main__":

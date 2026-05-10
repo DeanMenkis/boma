@@ -24,11 +24,11 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlencode
 
-from fastapi import Cookie, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Cookie, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from . import digikey_lists, digikey_oauth
+from . import digikey_oauth
 from .digikey_oauth import (
     DigiKeyOAuthError,
     build_authorize_url,
@@ -142,11 +142,9 @@ def _bounce_to_frontend(**params: str) -> RedirectResponse:
 
 @app.post("/enrich")
 async def enrich(
-    request: Request,
     file: UploadFile = File(...),
     deadline_days: Optional[int] = Form(default=None),
     list_name: Optional[str] = Form(default=None),
-    boma_session: Optional[str] = Cookie(default=None),
 ) -> JSONResponse:
     """Parse the uploaded CSV, run the agent pipeline, then build a DigiKey
     third-party MyList (no login). Returns enriched parts, summary, and
@@ -156,43 +154,22 @@ async def enrich(
         tmp.write(await file.read())
         tmp_path = tmp.name
 
+    stem = Path(file.filename or "bom.csv").stem or "BOMA list"
+    list_label = (list_name or stem).strip() or stem
     try:
-        result = enrich_bom(tmp_path, deadline_days)
+        result = enrich_bom(tmp_path, deadline_days, digikey_list_name=list_label)
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
-    parts = result.get("parts", [])
     summary = result.get("summary", {})
     response: dict = {
-        "parts": parts,
+        "parts": result.get("parts", []),
         "summary": summary,
         "deadline_days": deadline_days,
         "total_cost_usd": summary.get("total_cost_usd"),
     }
-
-    list_parts = [
-        {
-            "part_number": p.get("digikey_part_number") or "",
-            "quantity": int(p.get("quantity") or 1),
-            "designator": p.get("designator") or "",
-            "notes": (p.get("match_reason") or "")[:500],
-        }
-        for p in parts
-        if p.get("digikey_part_number")
-    ]
-
-    if list_parts:
-        name = list_name or (Path(file.filename or "BOMA list").stem or "BOMA list")
-        try:
-            list_info = digikey_lists.create_list_with_parts(
-                list_name=f"BOMA — {name}",
-                parts=list_parts,
-            )
-            response["digikey_list"] = list_info
-            response["list_url"] = list_info.get("list_url") or list_info.get(
-                "single_use_url"
-            )
-        except digikey_lists.DigiKeyListError as e:
-            response["digikey_list_error"] = str(e)
+    for key in ("digikey_list", "list_url", "digikey_list_error"):
+        if key in result:
+            response[key] = result[key]
 
     return JSONResponse(response)

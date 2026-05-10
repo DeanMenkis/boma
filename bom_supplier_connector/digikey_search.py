@@ -67,6 +67,18 @@ def _v4_manufacturer_name(mfr: Any) -> str:
     return _pidvid_value(mfr) or ""
 
 
+def _v4_scalar_text(v: Any) -> str:
+    """OpenAPI v4 models (e.g. ``Description``) are not JSON-serializable; coerce to str."""
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v
+    inner = getattr(v, "value", None)
+    if isinstance(inner, str) and inner.strip():
+        return inner
+    return str(v)
+
+
 def _parse_lead_weeks(raw: Any) -> float:
     if raw is None:
         return 0.0
@@ -111,13 +123,13 @@ def _v4_product_to_candidate(obj: Any, quantity: int) -> dict:
     variations = list(getattr(root, "product_variations", None) or [])
     var0 = variations[0] if variations else None
 
-    mpn = getattr(root, "manufacturer_product_number", None) or ""
-    desc = getattr(root, "description", None) or ""
+    mpn = _v4_scalar_text(getattr(root, "manufacturer_product_number", None))
+    desc = _v4_scalar_text(getattr(root, "description", None))
     lead_raw = getattr(root, "manufacturer_lead_weeks", None)
     mfr = _v4_manufacturer_name(getattr(root, "manufacturer", None))
 
     if var0:
-        dkpn = getattr(var0, "digi_key_product_number", None) or ""
+        dkpn = _v4_scalar_text(getattr(var0, "digi_key_product_number", None))
         stock = int(getattr(var0, "quantity_availablefor_package_type", 0) or 0)
         if stock == 0:
             stock = int(getattr(root, "quantity_available", 0) or 0)
@@ -140,7 +152,7 @@ def _v4_product_to_candidate(obj: Any, quantity: int) -> dict:
         "stock": stock,
         "lead_time_weeks": _parse_lead_weeks(lead_raw),
         "digikey_part_number": dkpn,
-        "product_url": getattr(root, "product_url", None) or "",
+        "product_url": _v4_scalar_text(getattr(root, "product_url", None)),
         "manufacturer": mfr,
     }
 
