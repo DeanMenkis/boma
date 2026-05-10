@@ -1,6 +1,6 @@
 # BOMA
 
-> **From a BOM spreadsheet to a ready-to-buy hardware order. In under sixty seconds.**
+> **From a BOM spreadsheet to a ready-to-buy hardware order.**
 
 BOMA is a procurement agent for hardware teams. Upload the bill-of-materials your EDA tool already exports, and the agent finds every part across suppliers, compares price and lead time, and assembles a cart in under 60 seconds. Pay BOMA in USDC via AllScale and we hand back a pre-filled supplier cart for one-click checkout.
 
@@ -17,7 +17,7 @@ BOMA is a procurement agent for hardware teams. Upload the bill-of-materials you
 
 ## Team
 
-Popal Daudzai · Athif Saleem · Dean Menkis · Ilia Moroz
+Popal Daudzai · Athif Saleem · Dean David Menkis · Ilia Moroz
 
 ## Links
 
