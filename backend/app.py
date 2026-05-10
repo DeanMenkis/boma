@@ -4,7 +4,7 @@ app = FastAPI()
 
 @app.get("/")
 def read_root():
-    return {"status": "success", "message": "BOMA Backend is running on Popal-Backend branch"}
+    return {"status": "success", "message": "BOMA Backend is running"}
 
 @app.get("/health")
 def health_check():
