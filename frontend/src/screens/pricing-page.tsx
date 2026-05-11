@@ -10,7 +10,7 @@ const ALLSCALE_DOCS = "https://docs.allscale.io";
 
 const features = [
   "Live distributor pricing and stock on every line",
-  "DigiKey and Mouser in one flow. Export CSV or open a prefilled cart.",
+  "DigiKey live pricing in one flow. Export CSV or open a prefilled cart.",
   "Checkout in USDC via AllScale",
 ];
 

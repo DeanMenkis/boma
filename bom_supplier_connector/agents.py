@@ -118,6 +118,16 @@ def _dedupe_candidates(items: list[dict]) -> list[dict]:
 
 
 def _digikey_ready() -> bool:
+    """True only when we should try the real DigiKey API.
+
+    Set ``BOMA_USE_MOCK_CATALOG=1`` (or ``BOMA_DIGIKEY_DISABLE=1``) to force
+    the orchestrator into mock mode even when ``DIGIKEY_CLIENT_ID/SECRET``
+    are present. Useful when the OAuth token cache is empty in a non-
+    interactive process (uvicorn) and triggering the browser flow would
+    hang the request.
+    """
+    if os.getenv("BOMA_USE_MOCK_CATALOG") or os.getenv("BOMA_DIGIKEY_DISABLE"):
+        return False
     return bool(os.getenv("DIGIKEY_CLIENT_ID") and os.getenv("DIGIKEY_CLIENT_SECRET"))
 
 

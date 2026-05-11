@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
+  AlertCircle,
   Bookmark,
   Check,
   ExternalLink,
@@ -20,84 +21,76 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSavedBoms } from "@/hooks/useSavedBoms";
+import {
+  createDigikeyList,
+  enrichBom,
+  enrichedPartToCartRow,
+  type DigikeyListPart,
+} from "@/lib/agent-api";
 import type { BomCartRow, SavedBom } from "@/lib/bom-types";
 import { setPendingCheckoutCart } from "@/lib/checkout-cart-storage";
 import { getSavedBom } from "@/lib/saved-boms-storage";
+import {
+  clearAgentSession,
+  readAgentSession,
+  writeAgentSession,
+} from "@/lib/agent-session-storage";
 
-const MOCK_ROWS: BomCartRow[] = [
-  {
-    part: "STM32H743VIT6",
-    desc: "Microcontroller chip",
-    qty: 2,
-    distributor: "DigiKey",
-    unit: 14.62,
-    stock: 1284,
-    eta: "Ships May 12",
-    url: "#",
-  },
-  {
-    part: "TMC2209-LA-T",
-    desc: "Motor driver",
-    qty: 6,
-    distributor: "Mouser",
-    unit: 6.85,
-    stock: 412,
-    eta: "Ships May 12",
-    url: "#",
-  },
-  {
-    part: "BNO085",
-    desc: "Motion sensor",
-    qty: 1,
-    distributor: "DigiKey",
-    unit: 24.95,
-    stock: 88,
-    eta: "Ships May 13",
-    url: "#",
-  },
-  {
-    part: "INA226AIDGSR",
-    desc: "Power monitor chip",
-    qty: 4,
-    distributor: "Mouser",
-    unit: 3.42,
-    stock: 2310,
-    eta: "Ships May 12",
-    url: "#",
-  },
-  {
-    part: "LM2596S-5.0",
-    desc: "Voltage regulator",
-    qty: 3,
-    distributor: "DigiKey",
-    unit: 2.18,
-    stock: 5612,
-    eta: "Ships May 12",
-    url: "#",
-  },
-  {
-    part: "USB4500-03-A",
-    desc: "USB-C connector",
-    qty: 2,
-    distributor: "Mouser",
-    unit: 1.04,
-    stock: 9821,
-    eta: "Ships May 12",
-    url: "#",
-  },
-];
+function getHydratedAgentState(): {
+  rows: BomCartRow[] | null;
+  sourceLabel: string | null;
+  listParts: DigikeyListPart[] | null;
+  listName: string | null;
+  listError: string | null;
+  runError: string | null;
+} {
+  const empty = {
+    rows: null as BomCartRow[] | null,
+    sourceLabel: null as string | null,
+    listParts: null as DigikeyListPart[] | null,
+    listName: null as string | null,
+    listError: null as string | null,
+    runError: null as string | null,
+  };
+  if (typeof window === "undefined") return empty;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("load")) return empty;
+    const data = readAgentSession();
+    if (!data) return empty;
+    return {
+      rows: data.rows?.length ? data.rows : null,
+      sourceLabel: data.displayCaption,
+      listParts: data.listParts?.length ? data.listParts : null,
+      listName: data.listName,
+      listError: data.listError,
+      runError: data.runError,
+    };
+  } catch {
+    return empty;
+  }
+}
 
 export function BomAgentPage() {
   const router = useRouter();
   const { user } = useAuth();
   const { saveSavedBom } = useSavedBoms(user?.uid ?? null);
 
+  const [sessionSnap] = useState(() => getHydratedAgentState());
+
   const [file, setFile] = useState<File | null>(null);
-  const [sourceLabel, setSourceLabel] = useState<string | null>(null);
+  const [sourceLabel, setSourceLabel] = useState<string | null>(sessionSnap.sourceLabel);
   const [running, setRunning] = useState(false);
-  const [rows, setRows] = useState<BomCartRow[] | null>(null);
+  const [rows, setRows] = useState<BomCartRow[] | null>(sessionSnap.rows);
   const [drag, setDrag] = useState(false);
   const [saveAcknowledged, setSaveAcknowledged] = useState(false);
+  const [listParts, setListParts] = useState<DigikeyListPart[] | null>(
+    sessionSnap.listParts,
+  );
+  const [listName, setListName] = useState<string | null>(sessionSnap.listName);
+  const [listError, setListError] = useState<string | null>(sessionSnap.listError);
+  const [openingList, setOpeningList] = useState(false);
+  const [runError, setRunError] = useState<string | null>(sessionSnap.runError);
   const inputRef = useRef<HTMLInputElement>(null);
   const saveFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -105,6 +98,10 @@ export function BomAgentPage() {
     setRows(bom.rows);
     setSourceLabel(bom.title);
     setFile(null);
+    setListParts(null);
+    setListName(bom.title);
+    setListError(null);
+    setRunError(null);
   }, []);
 
   const onFile = (f: File | undefined | null) => {
@@ -112,15 +109,67 @@ export function BomAgentPage() {
     setFile(f);
     setRows(null);
     setSourceLabel(null);
+    setListParts(null);
+    setListName(null);
+    setListError(null);
+    setRunError(null);
   };
 
   const runAgent = async () => {
     if (!file) return;
     setRunning(true);
     setRows(null);
-    await new Promise((r) => setTimeout(r, 1600));
-    setRows(MOCK_ROWS);
-    setRunning(false);
+    setListParts(null);
+    setListName(null);
+    setListError(null);
+    setRunError(null);
+    try {
+      const baseName = file.name.replace(/\.[^.]+$/, "");
+      const data = await enrichBom(file, { listName: baseName });
+      const cartRows = (data.parts ?? []).map(enrichedPartToCartRow);
+      setRows(cartRows);
+      if (data.list_parts?.length) {
+        setListParts(data.list_parts);
+        setListName(data.list_name ?? baseName);
+      } else if (data.digikey_list_error) {
+        setListError(data.digikey_list_error);
+      }
+    } catch (err) {
+      setRunError(err instanceof Error ? err.message : "Agent run failed.");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  /**
+   * Always mint a fresh DigiKey list URL on click. The third-party MyList
+   * endpoint returns single-use URLs that get burned by browser prefetch
+   * or link previews, so we never cache the URL itself — only the parts
+   * payload, which can regenerate URLs indefinitely.
+   */
+  const openDigikeyList = async () => {
+    if (!listParts?.length || openingList) return;
+    setOpeningList(true);
+    setListError(null);
+    // Pre-open the tab synchronously so popup blockers don't reject it
+    // once the fetch resolves a moment later.
+    const popup = window.open("about:blank", "_blank", "noopener,noreferrer");
+    try {
+      const { list_url } = await createDigikeyList(listParts, listName ?? undefined);
+      if (popup) {
+        popup.location.href = list_url;
+      } else {
+        // Popup blocked — navigate in the current tab as fallback.
+        window.location.href = list_url;
+      }
+    } catch (err) {
+      if (popup) popup.close();
+      setListError(
+        err instanceof Error ? err.message : "Couldn't open DigiKey list.",
+      );
+    } finally {
+      setOpeningList(false);
+    }
   };
 
   const subtotal = rows?.reduce((s, r) => s + r.qty * r.unit, 0) ?? 0;
@@ -130,6 +179,34 @@ export function BomAgentPage() {
       if (saveFlashTimerRef.current) clearTimeout(saveFlashTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    const caption = file?.name ?? sourceLabel;
+    const hasCart = rows && rows.length > 0;
+    if (hasCart) {
+      writeAgentSession({
+        rows: rows!,
+        displayCaption: caption ?? null,
+        listParts,
+        listName,
+        listError,
+        runError,
+      });
+      return;
+    }
+    if (runError) {
+      writeAgentSession({
+        rows: [],
+        displayCaption: caption ?? null,
+        listParts,
+        listName,
+        listError,
+        runError,
+      });
+      return;
+    }
+    clearAgentSession();
+  }, [rows, file?.name, sourceLabel, listParts, listName, listError, runError]);
 
   const saveToProfile = useCallback(() => {
     if (!rows?.length || !user?.uid) return;
@@ -184,8 +261,7 @@ export function BomAgentPage() {
           Run BOMA on your list.
         </h1>
         <p className="mt-3 text-muted-foreground max-w-2xl">
-          Upload a spreadsheet. We&apos;ll search DigiKey and Mouser for every part and build one
-          priced cart.
+          Upload a spreadsheet. We&apos;ll search DigiKey for every part and build one priced cart.
         </p>
       </section>
 
@@ -202,11 +278,13 @@ export function BomAgentPage() {
               setDrag(false);
               onFile(e.dataTransfer.files?.[0]);
             }}
-            className={`rounded-2xl border-2 border-dashed p-10 text-center transition-colors ${
-              drag ? "border-primary bg-primary/5" : "border-border bg-card"
+            className={`group rounded-2xl border-2 border-dashed p-10 text-center cursor-default transition-all duration-200 ${
+              drag
+                ? "border-primary bg-primary/5 scale-[1.01] shadow-[0_0_24px_-8px_rgba(163,230,53,0.35)]"
+                : "border-border bg-card hover:border-primary/45 hover:bg-card/95 hover:shadow-[0_8px_28px_-12px_rgba(0,0,0,0.45)]"
             }`}
           >
-            <div className="mx-auto h-12 w-12 rounded-xl bg-surface-2 flex items-center justify-center text-primary">
+            <div className="mx-auto h-12 w-12 rounded-xl bg-surface-2 flex items-center justify-center text-primary transition-transform duration-200 group-hover:scale-105 group-hover:bg-primary/10">
               <Upload className="h-6 w-6" />
             </div>
             <p className="mt-4 text-sm">
@@ -217,7 +295,12 @@ export function BomAgentPage() {
               )}
             </p>
             <div className="mt-4 flex justify-center gap-2">
-              <Button variant="glass" size="sm" onClick={() => inputRef.current?.click()}>
+              <Button
+                variant="glass"
+                size="sm"
+                onClick={() => inputRef.current?.click()}
+                className="transition-all duration-200 hover:bg-primary/12 hover:ring-1 hover:ring-primary/30"
+              >
                 <FileSpreadsheet className="h-4 w-4" /> Choose file
               </Button>
               <input
@@ -227,7 +310,13 @@ export function BomAgentPage() {
                 hidden
                 onChange={(e) => onFile(e.target.files?.[0])}
               />
-              <Button variant="hero" size="sm" disabled={!file || running} onClick={runAgent}>
+              <Button
+                variant="hero"
+                size="sm"
+                disabled={!file || running}
+                onClick={runAgent}
+                className="transition-all duration-200 enabled:hover:brightness-110 enabled:hover:shadow-[0_0_24px_-6px_rgba(163,230,53,0.45)]"
+              >
                 {running ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
@@ -244,9 +333,23 @@ export function BomAgentPage() {
               <div className="font-mono text-sm space-y-1.5 text-muted-foreground">
                 <div>→ reading your file…</div>
                 <div>→ searching DigiKey…</div>
-                <div>→ searching Mouser…</div>
                 <div className="text-foreground">→ picking the best match for each part…</div>
+                <div>→ building DigiKey cart…</div>
                 <div className="shimmer h-px mt-3" />
+              </div>
+            </div>
+          )}
+
+          {runError && !running && (
+            <div className="rounded-2xl border border-destructive/40 bg-destructive/5 p-4 shadow-card">
+              <div className="flex items-start gap-3 text-sm">
+                <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" aria-hidden />
+                <div>
+                  <p className="font-semibold text-foreground">Agent run failed</p>
+                  <p className="text-muted-foreground font-mono text-xs mt-1 break-words">
+                    {runError}
+                  </p>
+                </div>
               </div>
             </div>
           )}
@@ -257,7 +360,8 @@ export function BomAgentPage() {
                 <div>
                   <h2 className="text-sm font-semibold">Cart</h2>
                   <p className="text-xs text-muted-foreground font-mono">
-                    {rows.length} items · ships by Tue, May 13
+                    {rows.length} items
+                    {listParts?.length ? ` · DigiKey list ready (${listParts.length})` : ""}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -269,7 +373,7 @@ export function BomAgentPage() {
                       onClick={saveToProfile}
                       aria-live="polite"
                       className={cn(
-                        "gap-1.5 transition-[color,box-shadow,border-color] duration-200",
+                        "gap-1.5 transition-all duration-200 hover:bg-primary/12 hover:ring-1 hover:ring-primary/30",
                         saveAcknowledged && "save-to-profile-gold-flash",
                       )}
                     >
@@ -286,15 +390,57 @@ export function BomAgentPage() {
                       )}
                     </Button>
                   ) : (
-                    <Button variant="glass" size="sm" asChild>
+                    <Button
+                      variant="glass"
+                      size="sm"
+                      asChild
+                      className="transition-all duration-200 hover:bg-primary/12 hover:ring-1 hover:ring-primary/30"
+                    >
                       <Link href="/login">Sign in to save</Link>
                     </Button>
                   )}
-                  <Button variant="hero" size="sm" type="button" onClick={exportToCheckout}>
+                  {listParts?.length ? (
+                    <Button
+                      variant="hero"
+                      size="sm"
+                      type="button"
+                      onClick={openDigikeyList}
+                      disabled={openingList}
+                      className="transition-all duration-200 hover:brightness-110 hover:shadow-[0_0_22px_-6px_rgba(163,230,53,0.45)]"
+                    >
+                      {openingList ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <ExternalLink className="h-4 w-4" />
+                      )}{" "}
+                      {openingList ? "Opening…" : "Open list on DigiKey"}
+                    </Button>
+                  ) : null}
+                  <Button
+                    variant={listParts?.length ? "glass" : "hero"}
+                    size="sm"
+                    type="button"
+                    onClick={exportToCheckout}
+                    className={cn(
+                      "transition-all duration-200",
+                      listParts?.length
+                        ? "hover:bg-primary/12 hover:ring-1 hover:ring-primary/30"
+                        : "hover:brightness-110 hover:shadow-[0_0_22px_-6px_rgba(163,230,53,0.45)]",
+                    )}
+                  >
                     <ShoppingCart className="h-4 w-4" /> Export cart
                   </Button>
                 </div>
               </div>
+              {listError && (
+                <div className="px-6 py-3 border-b border-border bg-amber-500/5 text-xs text-muted-foreground flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" aria-hidden />
+                  <span>
+                    Couldn&apos;t build a DigiKey list automatically:{" "}
+                    <span className="font-mono">{listError}</span>
+                  </span>
+                </div>
+              )}
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="text-xs text-muted-foreground font-mono">
@@ -309,10 +455,10 @@ export function BomAgentPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((r) => (
+                    {rows.map((r, idx) => (
                       <tr
-                        key={r.part}
-                        className="border-b border-border/60 last:border-0 hover:bg-surface-2/50"
+                        key={`${r.part}-${idx}`}
+                        className="border-b border-border/60 last:border-0 border-l-[3px] border-l-transparent transition-colors duration-200 hover:border-l-primary hover:bg-primary/[0.08]"
                       >
                         <td className="px-6 py-3">
                           <div className="font-mono text-foreground">{r.part}</div>
@@ -330,9 +476,21 @@ export function BomAgentPage() {
                         </td>
                         <td className="px-3 py-3 text-xs text-muted-foreground">{r.eta}</td>
                         <td className="px-3 py-3">
-                          <a href={r.url} className="text-muted-foreground hover:text-primary">
-                            <ExternalLink className="h-4 w-4" />
-                          </a>
+                          {r.url && r.url !== "#" ? (
+                            <a
+                              href={r.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex rounded-lg p-2 -m-1 text-muted-foreground transition-all duration-200 hover:bg-primary/15 hover:text-primary hover:scale-110 hover:shadow-[0_0_16px_-6px_rgba(163,230,53,0.35)]"
+                              aria-label={`Open ${r.part} on supplier site`}
+                            >
+                              <ExternalLink className="h-4 w-4" />
+                            </a>
+                          ) : (
+                            <span className="text-muted-foreground/40">
+                              <ExternalLink className="h-4 w-4" />
+                            </span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -348,16 +506,16 @@ export function BomAgentPage() {
         </div>
 
         <aside className="space-y-4">
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-card transition-all duration-200 hover:border-primary/35 hover:shadow-[0_14px_44px_-18px_rgba(0,0,0,0.55)]">
             <h3 className="text-sm font-semibold">Sources</h3>
             <ul className="mt-3 space-y-2 text-sm font-mono">
               <li className="flex items-center justify-between">
                 <span>DigiKey</span>
                 <span className="h-2 w-2 rounded-full bg-primary" />
               </li>
-              <li className="flex items-center justify-between">
+              <li className="flex items-center justify-between text-muted-foreground">
                 <span>Mouser</span>
-                <span className="h-2 w-2 rounded-full bg-primary" />
+                <span className="text-[10px]">soon</span>
               </li>
               <li className="flex items-center justify-between text-muted-foreground">
                 <span>Arrow</span>
@@ -369,7 +527,7 @@ export function BomAgentPage() {
               </li>
             </ul>
           </div>
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-card transition-all duration-200 hover:border-primary/35 hover:shadow-[0_14px_44px_-18px_rgba(0,0,0,0.55)]">
             <h3 className="text-sm font-semibold">Tips</h3>
             <ul className="mt-3 space-y-2 text-xs text-muted-foreground">
               <li>

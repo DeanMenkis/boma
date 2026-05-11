@@ -33,11 +33,11 @@ export const metadata: Metadata = {
     template: "%s — BOMA",
   },
   description:
-    "Upload your parts list. BOMA finds every part on DigiKey and Mouser and builds a priced cart with shipping dates — automatically.",
+    "Upload your parts list. BOMA finds every part on DigiKey and builds a priced cart with shipping dates — automatically.",
   openGraph: {
     title: "BOMA — Bill Of Materials Agent",
     description:
-      "Upload your parts list and get a priced cart from DigiKey, Mouser, and more — with shipping dates, in seconds.",
+      "Upload your parts list and get a priced cart from DigiKey — with shipping dates, in seconds.",
     type: "website",
   },
   twitter: {

@@ -9,3 +9,5 @@ fastapi>=0.110.0
 uvicorn[standard]>=0.27.0
 python-multipart>=0.0.9
 rich>=13.7.0
+# Bypasses Cloudflare's TLS fingerprinting on www.digikey.com/mylists/api/thirdparty.
+curl_cffi>=0.7.0

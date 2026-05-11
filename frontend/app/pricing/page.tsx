@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Pricing — BOMA",
     description:
-      "$1 + $0.10 per CSV line. Stablecoin checkout with AllScale; live pricing on DigiKey and Mouser.",
+      "$1 + $0.10 per CSV line. Stablecoin checkout with AllScale; live pricing on DigiKey.",
   },
 };
 

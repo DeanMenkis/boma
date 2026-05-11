@@ -3,6 +3,7 @@ import { Header } from "@/components/site/Header";
 import { Footer } from "@/components/site/Footer";
 import HomeScrollDemo from "@/components/site/HomeScrollDemo";
 import { Button } from "@/components/ui/button";
+import { CLOD_MODEL_ID } from "@/lib/clod-models";
 import {
   formatMarketingCurrency,
   MARKETING_BOM_LINE_COUNT,
@@ -23,7 +24,7 @@ export function HomePage() {
         <div className="relative mx-auto max-w-5xl px-6 pt-24 pb-32 text-center">
           <div className="inline-flex items-center gap-2 rounded-full border border-border glass px-3 py-1 text-xs font-mono text-muted-foreground">
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
-            v0.1 · DigiKey + Mouser live
+            v0.1 · DigiKey live
           </div>
 
           <h1 className="mt-8 font-display text-5xl md:text-7xl leading-[1.05] text-gradient">
@@ -33,8 +34,8 @@ export function HomePage() {
           </h1>
 
           <p className="mx-auto mt-6 max-w-xl text-base text-muted-foreground">
-            Upload your parts list. BOMA finds every part on DigiKey and Mouser, picks the best
-            in-stock option, and gives you one priced cart with shipping dates.
+            Upload your parts list. BOMA finds every part on DigiKey, picks the best in-stock
+            option, and gives you one priced cart with shipping dates.
           </p>
 
           <div className="mt-10 flex flex-wrap justify-center gap-3">
@@ -48,6 +49,23 @@ export function HomePage() {
                 See pricing
               </Button>
             </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* CLōD: single model ID; backend runs parallel agent work with the same model */}
+      <section className="border-y border-border bg-surface/40">
+        <div className="mx-auto max-w-2xl px-6 py-10 text-center">
+          <p className="font-mono text-xs text-primary uppercase tracking-widest">
+            Model on CLōD
+          </p>
+          <p className="mt-4 text-sm text-muted-foreground">
+            Claude Sonnet 4 runs your BOM in parallel: one model for search and matching, not a mix of
+            tiers.
+          </p>
+          <div className="mt-6 rounded-xl border border-border bg-card/60 px-4 py-4">
+            <div className="font-mono text-sm text-foreground">Claude Sonnet 4</div>
+            <div className="mt-2 font-mono text-xs text-muted-foreground break-all">{CLOD_MODEL_ID}</div>
           </div>
         </div>
       </section>
@@ -73,7 +91,7 @@ export function HomePage() {
                 "Smart part matching, with backups if something's out of stock",
                 "Live prices and stock for every line",
                 "One shipping date for the whole cart",
-                "Export to CSV, or send straight to DigiKey or Mouser",
+                "Export to CSV, or send straight to DigiKey",
               ].map((f) => (
                 <li key={f} className="flex items-center gap-2">
                   <Check className="h-4 w-4 text-primary" /> {f}
@@ -90,7 +108,7 @@ export function HomePage() {
                   t: "BOM",
                   v: `${MARKETING_BOM_LINE_COUNT} lines · ${MARKETING_BOM_UNIT_COUNT.toLocaleString()} units`,
                 },
-                { i: Cpu, t: "Sources", v: "DigiKey + Mouser" },
+                { i: Cpu, t: "Sources", v: "DigiKey" },
                 { i: Clock, t: "Ships", v: "In 3 days" },
                 { i: ShoppingCart, t: "Cart", v: formatMarketingCurrency(MARKETING_BOM_SUBTOTAL) },
               ].map(({ i: Icon, t, v }) => (

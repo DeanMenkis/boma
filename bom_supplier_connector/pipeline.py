@@ -4,7 +4,6 @@ BOM CSV parsing and enrich_bom main pipeline.
 from __future__ import annotations
 
 import csv
-import io
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -19,59 +18,69 @@ def _plog(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] [PIPELINE] {msg}", flush=True)
 
 
-def _read_csv_text(path: Path) -> str:
-    """Read CSV as text; support UTF-8, UTF-8 BOM, and UTF-16 LE/BE (Excel export)."""
-    peek = path.read_bytes()[:4]
-    if peek.startswith(b"\xff\xfe"):
-        return path.read_text(encoding="utf-16-le", errors="replace")
-    if peek.startswith(b"\xfe\xff"):
-        return path.read_text(encoding="utf-16-be", errors="replace")
-    if peek.startswith(b"\xef\xbb\xbf"):
-        return path.read_text(encoding="utf-8-sig", errors="replace")
-    return path.read_text(encoding="utf-8", errors="replace")
+def _detect_dialect(sample: str) -> csv.Dialect | type[csv.Dialect]:
+    """Pick the right delimiter for BOM exports.
+
+    EasyEDA / KiCad / Altium and the user-uploaded test files use TSV; the
+    samples in this repo use plain CSV. ``csv.Sniffer`` handles both plus
+    semicolon-separated locales without a hardcoded delimiter list.
+    """
+    try:
+        return csv.Sniffer().sniff(sample, delimiters=",\t;|")
+    except csv.Error:
+        return csv.excel
+
+
+def _detect_encoding(path: Path) -> str:
+    """Pick text encoding from a BOM. EasyEDA and KiCad both export UTF-16-LE
+    by default; Altium/manual edits are usually UTF-8 (sometimes with BOM)."""
+    with path.open("rb") as f:
+        head = f.read(4)
+    if head.startswith(b"\xff\xfe") or head.startswith(b"\xfe\xff"):
+        # ``utf-16`` (not ``utf-16-le/-be``) consumes the BOM so the first
+        # header doesn't end up as ``\ufeffID``.
+        return "utf-16"
+    if head.startswith(b"\xef\xbb\xbf"):
+        return "utf-8-sig"
+    return "utf-8"
 
 
 def parse_bom_csv(filepath: str) -> list[dict]:
     path = Path(filepath)
-    text = _read_csv_text(path)
-    if text.startswith("\ufeff"):
-        text = text[1:]
-    first = (text.splitlines()[0] if text else "").strip("\r")
-    delim = (
-        "\t"
-        if "\t" in first and first.count("\t") > first.count(",")
-        else ","
-    )
-    reader = csv.DictReader(io.StringIO(text, newline=""), delimiter=delim)
-    rows: list[dict] = []
-    for raw in reader:
-        try:
-            rid = int((raw.get("ID") or raw.get("id") or "0").strip())
-        except (TypeError, ValueError, AttributeError):
-            rid = len(rows) + 1
-        try:
-            qty = int(float((raw.get("Quantity") or "0").strip()))
-        except (TypeError, ValueError, AttributeError):
-            qty = 0
-        try:
-            price = float((raw.get("Price") or "0").strip())
-        except (TypeError, ValueError, AttributeError):
-            price = 0.0
-        rows.append(
-            {
-                "id": rid,
-                "name": (raw.get("Name") or "").strip(),
-                "designator": (raw.get("Designator") or "").strip(),
-                "footprint": (raw.get("Footprint") or "").strip(),
-                "quantity": qty,
-                "mpn": (raw.get("Manufacturer Part") or "").strip(),
-                "manufacturer": (raw.get("Manufacturer") or "").strip(),
-                "supplier": (raw.get("Supplier") or "").strip(),
-                "supplier_part": (raw.get("Supplier Part") or "").strip(),
-                "existing_price": price,
-            }
-        )
-    return rows
+    encoding = _detect_encoding(path)
+    with path.open(newline="", encoding=encoding, errors="replace") as f:
+        sample = f.read(4096)
+        f.seek(0)
+        reader = csv.DictReader(f, dialect=_detect_dialect(sample))
+        rows: list[dict] = []
+        for raw in reader:
+            try:
+                rid = int((raw.get("ID") or raw.get("id") or "0").strip())
+            except (TypeError, ValueError, AttributeError):
+                rid = len(rows) + 1
+            try:
+                qty = int(float((raw.get("Quantity") or "0").strip()))
+            except (TypeError, ValueError, AttributeError):
+                qty = 0
+            try:
+                price = float((raw.get("Price") or "0").strip())
+            except (TypeError, ValueError, AttributeError):
+                price = 0.0
+            rows.append(
+                {
+                    "id": rid,
+                    "name": (raw.get("Name") or "").strip(),
+                    "designator": (raw.get("Designator") or "").strip(),
+                    "footprint": (raw.get("Footprint") or "").strip(),
+                    "quantity": qty,
+                    "mpn": (raw.get("Manufacturer Part") or "").strip(),
+                    "manufacturer": (raw.get("Manufacturer") or "").strip(),
+                    "supplier": (raw.get("Supplier") or "").strip(),
+                    "supplier_part": (raw.get("Supplier Part") or "").strip(),
+                    "existing_price": price,
+                }
+            )
+        return rows
 
 
 def _apply_mock_fallback(orch: list[dict]) -> list[dict]:

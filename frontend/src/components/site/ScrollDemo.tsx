@@ -122,8 +122,8 @@ function ScrollDemoAnimated() {
               From spreadsheet to checkout, automatically.
             </h2>
             <p className="mx-auto mt-3 max-w-xl text-sm text-muted-foreground">
-              Watch a single line travel from your BOM through DigiKey and Mouser into a priced
-              cart. Scroll to play.
+              Watch a single line travel from your BOM through DigiKey into a priced cart. Scroll to
+              play.
             </p>
           </motion.div>
 
@@ -357,10 +357,6 @@ function FloatingRow({
           <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-red-400" />
           DigiKey
         </span>
-        <span className="rounded-full border border-border bg-surface px-2 py-1 text-muted-foreground">
-          <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-blue-400" />
-          Mouser
-        </span>
       </motion.div>
 
       {/* Price + stock */}
@@ -463,7 +459,7 @@ function CartCard({
             <div className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
               Cart
             </div>
-            <div className="text-sm">Live · DigiKey + Mouser</div>
+            <div className="text-sm">Live · DigiKey</div>
           </div>
         </div>
         <div className="rounded-md border border-border bg-surface px-2 py-1 font-mono text-[10px] text-muted-foreground">
@@ -532,7 +528,7 @@ function ScrollDemoStatic() {
           {
             icon: Sparkles,
             title: "Match every part",
-            body: "We search DigiKey and Mouser in parallel and pick the best in-stock option.",
+            body: "We search DigiKey and pick the best in-stock option for each line.",
           },
           {
             icon: ShoppingCart,
