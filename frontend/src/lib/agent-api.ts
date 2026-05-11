@@ -64,11 +64,43 @@ export type EnrichResponse = {
 function apiBase(): string {
   const url = process.env.NEXT_PUBLIC_API_URL;
   if (!url) {
-    throw new Error(
-      "NEXT_PUBLIC_API_URL is not set — add it to frontend/.env.local",
-    );
+    throw new Error("NEXT_PUBLIC_API_URL is not set — add it to frontend/.env.local");
   }
   return url.replace(/\/+$/, "");
+}
+
+/** Public base URL for UI hints (e.g. connection troubleshooting). */
+export function publicApiBase(): string {
+  return apiBase();
+}
+
+/** Quick reachability check before a long-running enrich request. */
+export async function checkBackendHealth(): Promise<boolean> {
+  try {
+    const res = await fetch(`${apiBase()}/health`, { method: "GET" });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Turn fetch failures into actionable copy for the agent UI. */
+export function describeAgentFetchError(err: unknown): string {
+  if (!(err instanceof Error)) return "Agent run failed.";
+  const m = err.message || "";
+  const isNetwork =
+    m.includes("NetworkError") ||
+    m.includes("Failed to fetch") ||
+    m.includes("Load failed") ||
+    err.name === "TypeError";
+  if (isNetwork) {
+    return (
+      `Could not reach the BOMA API at ${publicApiBase()}. ` +
+      `Start the FastAPI backend (port 8000) and confirm NEXT_PUBLIC_API_URL in frontend/.env.local. ` +
+      `(Original: ${m || err.name})`
+    );
+  }
+  return m || "Agent run failed.";
 }
 
 /** Calls `POST /enrich`. Throws on non-2xx with the backend's detail. */
@@ -83,11 +115,16 @@ export async function enrichBom(
   }
   if (opts.listName) form.append("list_name", opts.listName);
 
-  const res = await fetch(`${apiBase()}/enrich`, {
-    method: "POST",
-    body: form,
-    headers: opts.idToken ? { Authorization: `Bearer ${opts.idToken}` } : undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${apiBase()}/enrich`, {
+      method: "POST",
+      body: form,
+      headers: opts.idToken ? { Authorization: `Bearer ${opts.idToken}` } : undefined,
+    });
+  } catch (e: unknown) {
+    throw new Error(describeAgentFetchError(e));
+  }
 
   if (!res.ok) {
     let detail = `Backend returned ${res.status}`;
@@ -107,11 +144,16 @@ export async function createDigikeyList(
   parts: DigikeyListPart[],
   listName?: string,
 ): Promise<{ list_url: string; added_count?: number; skipped_count?: number }> {
-  const res = await fetch(`${apiBase()}/digikey/list`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ parts, list_name: listName }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${apiBase()}/digikey/list`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parts, list_name: listName }),
+    });
+  } catch (e: unknown) {
+    throw new Error(describeAgentFetchError(e));
+  }
   if (!res.ok) {
     let detail = `Backend returned ${res.status}`;
     try {
@@ -168,8 +210,7 @@ export function enrichedPartToCartRow(p: EnrichedPart): BomCartRow {
 
 function formatEta(p: EnrichedPart): string {
   const days =
-    Number.isFinite(Number(p.estimated_arrival_days)) &&
-    Number(p.estimated_arrival_days) > 0
+    Number.isFinite(Number(p.estimated_arrival_days)) && Number(p.estimated_arrival_days) > 0
       ? Number(p.estimated_arrival_days)
       : Number(p.lead_time_weeks ?? 0) > 0
         ? Math.round(Number(p.lead_time_weeks) * 7 + 3)

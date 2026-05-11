@@ -38,6 +38,11 @@ except ImportError:  # pragma: no cover - optional fallback
 THIRD_PARTY_MYLIST_URL = "https://www.digikey.com/mylists/api/thirdparty"
 TIMEOUT = 20
 
+# Optional fallback when DigiKey's third-party endpoint is blocked or flaky:
+# POST JSON {"list_name": "...", "parts": [...]} to your own worker / third-party
+# service that returns {"list_url": "https://..."} (or single_use_url).
+_DIGIKEY_LIST_PROXY_ENV = "DIGIKEY_LIST_PROXY_URL"
+
 # Cloudflare fingerprints TLS; rotate impersonations when one starts failing.
 _DEFAULT_IMPERSONATIONS = ("chrome136", "chrome124", "chrome120", "chrome110")
 
@@ -189,6 +194,57 @@ def _parse_third_party_url(raw_text: str) -> str:
     raise DigiKeyListError(f"No single-use URL in response: {text[:800]}")
 
 
+def _create_list_via_proxy(proxy_url: str, list_name: str, merged: list[dict]) -> dict[str, Any]:
+    """Delegate list creation to an external HTTPS endpoint (Cloudflare Worker, etc.)."""
+    payload = {"list_name": list_name, "parts": merged}
+    resp = requests.post(
+        proxy_url,
+        json=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            **(
+                {"Authorization": f"Bearer {tok}"}
+                if (tok := (os.getenv("DIGIKEY_LIST_PROXY_TOKEN") or "").strip())
+                else {}
+            ),
+        },
+        timeout=TIMEOUT,
+    )
+    if resp.status_code != 200:
+        raise DigiKeyListError(
+            f"List proxy returned HTTP {resp.status_code}: {resp.text[:600]}"
+        )
+    try:
+        data = resp.json()
+    except json.JSONDecodeError as exc:
+        raise DigiKeyListError(f"List proxy returned non-JSON: {resp.text[:400]}") from exc
+
+    url = (
+        (isinstance(data, dict) and (
+            data.get("list_url")
+            or data.get("single_use_url")
+            or data.get("singleUseUrl")
+            or data.get("url")
+        ))
+        or ""
+    )
+    if not url or not isinstance(url, str):
+        raise DigiKeyListError(f"List proxy JSON missing list_url: {str(data)[:400]}")
+    url = url.strip()
+    body_lines = _third_party_parts_json_array(merged)
+    valid = [p for p in merged if (p.get("part_number") or "").strip()]
+    skipped = [p for p in merged if not (p.get("part_number") or "").strip()]
+    return {
+        "single_use_url": url,
+        "list_url": url,
+        "added_count": len(body_lines),
+        "skipped_count": len(skipped),
+        "merged_unique_parts": len(body_lines),
+        "via_proxy": True,
+    }
+
+
 def merge_list_parts_by_dkpn(parts: Iterable[dict]) -> list[dict]:
     """Merge duplicate ``part_number`` rows (sum qty, join designators).
 
@@ -230,13 +286,11 @@ def create_list_with_parts(list_name: str, parts: list[dict]) -> dict[str, Any]:
     to ``customerReference`` / ``notes`` in the payload.
 
     Returns ``single_use_url`` and ``list_url`` (same value), plus counts.
-    """
-    if _cffi_requests is None:
-        raise DigiKeyListError(
-            "DigiKey MyLists requires curl_cffi (Cloudflare blocks plain TLS). "
-            "Install: pip install curl_cffi"
-        )
 
+    If ``DIGIKEY_LIST_PROXY_URL`` is set, a failure talking to DigiKey's site
+    is followed by one attempt to POST the same payload to that URL (plain
+    ``requests`` — use this for a third-party API or edge worker you control).
+    """
     merged = merge_list_parts_by_dkpn(parts)
     body = _third_party_parts_json_array(merged)
     if not body:
@@ -244,30 +298,50 @@ def create_list_with_parts(list_name: str, parts: list[dict]) -> dict[str, Any]:
             "No parts with a non-empty part_number (DigiKey part number) to send."
         )
 
-    tags = (os.getenv("DIGIKEY_MYLIST_TAGS") or "BOMA").strip() or "BOMA"
-    params = {"listName": list_name, "tags": tags}
+    proxy = (os.getenv(_DIGIKEY_LIST_PROXY_ENV) or "").strip()
 
-    status, text = _post_mylist(THIRD_PARTY_MYLIST_URL, params, body)
-    if status != 200 or _looks_like_cloudflare_block(status, text):
-        hint = ""
-        if _looks_like_cloudflare_block(status, text):
-            hint = (
-                " Cloudflare blocked the server request (TLS fingerprint). "
-                "Ensure curl_cffi is installed and upgrade if needed: pip install -U curl_cffi"
-            )
-        raise DigiKeyListError(
-            f"Third-party MyLists failed ({status}): {text[:800]}{hint}"
+    direct_err: DigiKeyListError | None = None
+    if _cffi_requests is not None:
+        tags = (os.getenv("DIGIKEY_MYLIST_TAGS") or "BOMA").strip() or "BOMA"
+        params = {"listName": list_name, "tags": tags}
+        try:
+            status, text = _post_mylist(THIRD_PARTY_MYLIST_URL, params, body)
+            if status != 200 or _looks_like_cloudflare_block(status, text):
+                hint = ""
+                if _looks_like_cloudflare_block(status, text):
+                    hint = (
+                        " Cloudflare blocked the server request (TLS fingerprint). "
+                        "Ensure curl_cffi is installed and upgrade if needed: pip install -U curl_cffi"
+                    )
+                raise DigiKeyListError(
+                    f"Third-party MyLists failed ({status}): {text[:800]}{hint}"
+                )
+            single = _parse_third_party_url(text)
+            skipped = [p for p in parts if not (p.get("part_number") or "").strip()]
+            return {
+                "single_use_url": single,
+                "list_url": single,
+                "added_count": len(body),
+                "skipped_count": len(skipped),
+                "merged_unique_parts": len(body),
+            }
+        except DigiKeyListError as exc:
+            direct_err = exc
+    else:
+        direct_err = DigiKeyListError(
+            "DigiKey MyLists requires curl_cffi (Cloudflare blocks plain TLS). "
+            "Install: pip install curl_cffi"
         )
 
-    single = _parse_third_party_url(text)
+    if not proxy:
+        assert direct_err is not None
+        raise direct_err
 
-    valid = [p for p in parts if (p.get("part_number") or "").strip()]
-    skipped = [p for p in parts if not (p.get("part_number") or "").strip()]
-
-    return {
-        "single_use_url": single,
-        "list_url": single,
-        "added_count": len(body),
-        "skipped_count": len(skipped),
-        "merged_unique_parts": len(body),
-    }
+    try:
+        return _create_list_via_proxy(proxy, list_name, merged)
+    except DigiKeyListError as proxy_exc:
+        if direct_err is not None:
+            raise DigiKeyListError(
+                f"{direct_err!s} — proxy fallback also failed: {proxy_exc!s}"
+            ) from proxy_exc
+        raise

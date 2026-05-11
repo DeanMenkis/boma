@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Bookmark,
@@ -10,6 +10,7 @@ import {
   ExternalLink,
   FileSpreadsheet,
   Loader2,
+  RefreshCw,
   ShoppingCart,
   Sparkles,
   Upload,
@@ -22,9 +23,12 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSavedBoms } from "@/hooks/useSavedBoms";
 import {
+  checkBackendHealth,
   createDigikeyList,
+  describeAgentFetchError,
   enrichBom,
   enrichedPartToCartRow,
+  publicApiBase,
   type DigikeyListPart,
 } from "@/lib/agent-api";
 import type { BomCartRow, SavedBom } from "@/lib/bom-types";
@@ -35,6 +39,21 @@ import {
   readAgentSession,
   writeAgentSession,
 } from "@/lib/agent-session-storage";
+
+const AGENT_RUN_STEPS = [
+  "reading your file",
+  "searching DigiKey",
+  "picking the best match for each part",
+  "building your priced cart",
+] as const;
+
+function safePublicApiDisplay(): string {
+  try {
+    return publicApiBase();
+  } catch {
+    return "(set NEXT_PUBLIC_API_URL in .env.local)";
+  }
+}
 
 function getHydratedAgentState(): {
   rows: BomCartRow[] | null;
@@ -84,15 +103,22 @@ export function BomAgentPage() {
   const [rows, setRows] = useState<BomCartRow[] | null>(sessionSnap.rows);
   const [drag, setDrag] = useState(false);
   const [saveAcknowledged, setSaveAcknowledged] = useState(false);
-  const [listParts, setListParts] = useState<DigikeyListPart[] | null>(
-    sessionSnap.listParts,
-  );
+  const [listParts, setListParts] = useState<DigikeyListPart[] | null>(sessionSnap.listParts);
   const [listName, setListName] = useState<string | null>(sessionSnap.listName);
   const [listError, setListError] = useState<string | null>(sessionSnap.listError);
   const [openingList, setOpeningList] = useState(false);
   const [runError, setRunError] = useState<string | null>(sessionSnap.runError);
+  const [runPhase, setRunPhase] = useState<null | "health" | "enrich">(null);
+  const [runElapsedSec, setRunElapsedSec] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const saveFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const apiDisplayUrl = useMemo(() => safePublicApiDisplay(), []);
+
+  const activeRunStepIndex =
+    runPhase === "enrich"
+      ? Math.min(AGENT_RUN_STEPS.length - 1, Math.floor(runElapsedSec / 4))
+      : -1;
 
   const onSavedBomLoaded = useCallback((bom: SavedBom) => {
     setRows(bom.rows);
@@ -118,12 +144,20 @@ export function BomAgentPage() {
   const runAgent = async () => {
     if (!file) return;
     setRunning(true);
+    setRunPhase("health");
     setRows(null);
     setListParts(null);
     setListName(null);
     setListError(null);
     setRunError(null);
     try {
+      const ok = await checkBackendHealth();
+      if (!ok) {
+        throw new Error(
+          `BOMA API did not respond at ${apiDisplayUrl}. Start the FastAPI backend (port 8000) and check NEXT_PUBLIC_API_URL.`,
+        );
+      }
+      setRunPhase("enrich");
       const baseName = file.name.replace(/\.[^.]+$/, "");
       const data = await enrichBom(file, { listName: baseName });
       const cartRows = (data.parts ?? []).map(enrichedPartToCartRow);
@@ -135,9 +169,10 @@ export function BomAgentPage() {
         setListError(data.digikey_list_error);
       }
     } catch (err) {
-      setRunError(err instanceof Error ? err.message : "Agent run failed.");
+      setRunError(describeAgentFetchError(err));
     } finally {
       setRunning(false);
+      setRunPhase(null);
     }
   };
 
@@ -164,9 +199,7 @@ export function BomAgentPage() {
       }
     } catch (err) {
       if (popup) popup.close();
-      setListError(
-        err instanceof Error ? err.message : "Couldn't open DigiKey list.",
-      );
+      setListError(describeAgentFetchError(err));
     } finally {
       setOpeningList(false);
     }
@@ -179,6 +212,19 @@ export function BomAgentPage() {
       if (saveFlashTimerRef.current) clearTimeout(saveFlashTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!running) {
+      setRunElapsedSec(0);
+      return;
+    }
+    const t0 = Date.now();
+    setRunElapsedSec(0);
+    const id = window.setInterval(() => {
+      setRunElapsedSec(Math.floor((Date.now() - t0) / 1000));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [running]);
 
   useEffect(() => {
     const caption = file?.name ?? sourceLabel;
@@ -329,13 +375,52 @@ export function BomAgentPage() {
           </div>
 
           {running && (
-            <div className="rounded-2xl border border-border bg-card p-6 shadow-card">
-              <div className="font-mono text-sm space-y-1.5 text-muted-foreground">
-                <div>→ reading your file…</div>
-                <div>→ searching DigiKey…</div>
-                <div className="text-foreground">→ picking the best match for each part…</div>
-                <div>→ building DigiKey cart…</div>
-                <div className="shimmer h-px mt-3" />
+            <div
+              role="status"
+              aria-live="polite"
+              aria-busy="true"
+              className="rounded-2xl border border-primary/25 bg-card p-6 shadow-card"
+            >
+              <div className="flex items-start gap-3">
+                <Loader2
+                  className="h-5 w-5 animate-spin text-primary shrink-0 mt-0.5"
+                  aria-hidden
+                />
+                <div className="flex-1 min-w-0 space-y-3">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">
+                      {runPhase === "health"
+                        ? "Checking backend connection…"
+                        : "Running BOM agent…"}
+                    </p>
+                    <p className="text-xs font-mono text-muted-foreground mt-1 break-all">
+                      {apiDisplayUrl}
+                    </p>
+                    {runPhase === "enrich" && (
+                      <p className="text-xs text-muted-foreground mt-2">
+                        Elapsed {runElapsedSec}s — CLōD + DigiKey lookups can take a minute on large
+                        BOMs.
+                      </p>
+                    )}
+                  </div>
+                  {runPhase === "enrich" && (
+                    <ol className="font-mono text-sm space-y-1.5 list-none pl-0">
+                      {AGENT_RUN_STEPS.map((label, i) => (
+                        <li
+                          key={label}
+                          className={cn(
+                            i === activeRunStepIndex
+                              ? "text-foreground font-medium"
+                              : "text-muted-foreground",
+                          )}
+                        >
+                          → {label}…
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                  <div className="shimmer h-px" />
+                </div>
               </div>
             </div>
           )}
@@ -344,11 +429,24 @@ export function BomAgentPage() {
             <div className="rounded-2xl border border-destructive/40 bg-destructive/5 p-4 shadow-card">
               <div className="flex items-start gap-3 text-sm">
                 <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" aria-hidden />
-                <div>
+                <div className="flex-1 min-w-0">
                   <p className="font-semibold text-foreground">Agent run failed</p>
                   <p className="text-muted-foreground font-mono text-xs mt-1 break-words">
                     {runError}
                   </p>
+                  <div className="mt-3">
+                    <Button
+                      type="button"
+                      variant="glass"
+                      size="sm"
+                      disabled={!file || running}
+                      onClick={() => void runAgent()}
+                      className="gap-1.5 transition-all duration-200 hover:bg-primary/12 hover:ring-1 hover:ring-primary/30"
+                    >
+                      <RefreshCw className="h-4 w-4" aria-hidden />
+                      Retry
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -432,6 +530,16 @@ export function BomAgentPage() {
                   </Button>
                 </div>
               </div>
+              {openingList && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="px-6 py-3 border-b border-border bg-primary/5 flex items-center gap-2 text-sm text-foreground"
+                >
+                  <Loader2 className="h-4 w-4 animate-spin shrink-0" aria-hidden />
+                  <span>Contacting your BOMA backend for a fresh one-time DigiKey list link…</span>
+                </div>
+              )}
               {listError && (
                 <div className="px-6 py-3 border-b border-border bg-amber-500/5 text-xs text-muted-foreground flex items-start gap-2">
                   <AlertCircle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" aria-hidden />
