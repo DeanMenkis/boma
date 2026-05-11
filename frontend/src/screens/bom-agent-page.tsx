@@ -83,7 +83,8 @@ function getHydratedAgentState(): {
       listParts: data.listParts?.length ? data.listParts : null,
       listName: data.listName,
       listError: data.listError,
-      runError: data.runError,
+      // Never restore run failures from session — errors should clear on full reload.
+      runError: null,
     };
   } catch {
     return empty;
@@ -236,7 +237,7 @@ export function BomAgentPage() {
         listParts,
         listName,
         listError,
-        runError,
+        runError: null,
       });
       return;
     }
@@ -247,7 +248,7 @@ export function BomAgentPage() {
         listParts,
         listName,
         listError,
-        runError,
+        runError: null,
       });
       return;
     }
